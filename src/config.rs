@@ -76,6 +76,17 @@ impl Config {
     pub fn store_path(&self) -> Result<&str> {
         self.store.as_deref().context(NO_STORE)
     }
+
+    /// Target directory for an agent.
+    pub fn agent_target(&self, agent: &str) -> String {
+        if let Some(target) = self.agents.get(agent) {
+            return target.clone();
+        }
+        match agent {
+            "agent" | "agents" => self.default_target.clone(),
+            _ => format!(".{agent}/skills"),
+        }
+    }
 }
 
 /// Watch settings (used by later phases).

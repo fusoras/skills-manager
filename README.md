@@ -57,8 +57,8 @@ debounce_ms = 500
 | `skm store scan`                                                                                    | Full scan of the store: skills, packs and warnings                  |
 | `skm list`                                                                                          | Skills available in the store                                       |
 | `skm projects`                                                                                      | List all managed projects on this machine                           |
-| `skm add <skill>... [--agent <name>] [--dir <path>] [--pin] [--force] [--dry-run]`                   | Copy skills into this project and record them                       |
-| `skm remove <skill>... [--force] [--dry-run]`                                                       | Delete the copies and unregister them                               |
+| `skm add <skill>... [--agent] [--opencode] [--claude] [--codex] [--pi] [--dir <path>] [--pin] [--force] [--dry-run]` | Copy skills into project agent targets and record them |
+| `skm remove <skill>... [--agent] [--opencode] [--claude] [--codex] [--pi] [--dir <path>] [--force] [--dry-run]`     | Delete copies and unregister them                      |
 | `skm status`                                                                                        | Health of every recorded skill (read only)                          |
 | `skm sync [--force] [--dry-run]`                                                                    | Reconcile the project with the store                                |
 
@@ -137,18 +137,29 @@ $ skm projects
 ### Installing
 
 `skm add` resolves each skill in the registered store, resolves the target
-directory, and copies the whole skill directory as real files through a temporary
+directories, and copies the whole skill directory as real files through a temporary
 directory next to the destination plus an atomic `rename`, preserving
-permissions. The target is chosen in this order:
+permissions.
 
-1. `--dir <path>`
-2. `--agent <name>` (looked up in the `[agents]` table of the global config)
-3. Target previously recorded for that skill in `projects.toml`
-4. Known targets recorded for the project in `projects.toml`
-5. `default_target` of the global config (`.agents/skills`)
+Targets are chosen via agent flags:
+
+- `--agent` (or alias `--agents`): standard agents directory (`.agents/skills`) — **default** if no flag is given
+- `--opencode`: OpenCode directory (`.opencode/skills`)
+- `--claude`: Claude directory (`.claude/skills`)
+- `--codex`: Codex directory (`.codex/skills`)
+- `--pi`: Pi directory (`.pi/skills`)
+- `--cursor`: Cursor directory (`.cursor/skills`)
+- `--dir <path>`: any custom target path
+
+You can combine multiple agent flags in a single command to install into multiple
+agent targets simultaneously:
+
+```sh
+skm add git-commit --opencode --pi --codex
+```
 
 Each skill lands in `<target>/<skill name>`. `skm add` records the project and the
-skill in `~/.local/state/skm/projects.toml`.
+skills in `~/.local/state/skm/projects.toml`.
 
 Guards, all reported as errors with the exact flag that gets past them:
 

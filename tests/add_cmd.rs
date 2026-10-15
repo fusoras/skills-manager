@@ -227,50 +227,64 @@ fn add_resolves_the_target_from_flags_and_config() {
     sandbox.register_store(&store);
     let project = sandbox.project();
 
-    // `--dir` wins over everything else.
-    let output = stdout_of(sandbox.skm_in(&project).args([
-        "add",
-        "alpha",
-        "--dir",
-        "custom/skills",
-        "--agent",
-        "opencode",
-    ]));
+    // `--dir` installs into the explicit directory.
+    let output =
+        stdout_of(
+            sandbox
+                .skm_in(&project)
+                .args(["add", "alpha", "--dir", "custom/skills"]),
+        );
     assert_eq!(output, "Installed alpha -> custom/skills/alpha\n");
     assert!(project.join("custom/skills/alpha/SKILL.md").is_file());
     assert_clean_project(&project);
     stdout_of(sandbox.skm_in(&project).args(["remove", "alpha"]));
 
-    // `--agent` reads the target from the global config.
+    // `--opencode` installs into .opencode/skills.
     let output = stdout_of(
         sandbox
             .skm_in(&project)
-            .args(["add", "alpha", "--agent", "opencode"]),
+            .args(["add", "alpha", "--opencode"]),
     );
     assert_eq!(output, "Installed alpha -> .opencode/skills/alpha\n");
     assert!(project.join(".opencode/skills/alpha/SKILL.md").is_file());
     assert_clean_project(&project);
     stdout_of(sandbox.skm_in(&project).args(["remove", "alpha"]));
 
-    // Global `default_target` applies.
+    // `--claude`, `--codex`, `--pi` install into their respective directories.
+    let output = stdout_of(sandbox.skm_in(&project).args(["add", "alpha", "--claude"]));
+    assert_eq!(output, "Installed alpha -> .claude/skills/alpha\n");
+    assert!(project.join(".claude/skills/alpha/SKILL.md").is_file());
+    stdout_of(sandbox.skm_in(&project).args(["remove", "alpha"]));
+
+    // Multiple agent flags install into all specified targets in one command.
+    let output =
+        stdout_of(
+            sandbox
+                .skm_in(&project)
+                .args(["add", "alpha", "--opencode", "--pi", "--codex"]),
+        );
+    assert!(output.contains("Installed alpha -> .opencode/skills/alpha\n"));
+    assert!(output.contains("Installed alpha -> .pi/skills/alpha\n"));
+    assert!(output.contains("Installed alpha -> .codex/skills/alpha\n"));
+    assert!(project.join(".opencode/skills/alpha/SKILL.md").is_file());
+    assert!(project.join(".pi/skills/alpha/SKILL.md").is_file());
+    assert!(project.join(".codex/skills/alpha/SKILL.md").is_file());
+    stdout_of(sandbox.skm_in(&project).args(["remove", "alpha"]));
+
+    // Default with no flags applies --agent (.agents/skills).
     let output = stdout_of(sandbox.skm_in(&project).args(["add", "alpha"]));
     assert_eq!(output, "Installed alpha -> .agents/skills/alpha\n");
     assert_clean_project(&project);
 }
 
 #[test]
-fn add_rejects_an_unknown_agent() {
+fn add_rejects_an_unknown_flag() {
     let (sandbox, _store, project) = ready();
 
-    let (_, stderr) = failure_of(
-        sandbox
-            .skm_in(&project)
-            .args(["add", "alpha", "--agent", "ghost"]),
-    );
+    let (_, stderr) = failure_of(sandbox.skm_in(&project).args(["add", "alpha", "--ghost"]));
 
     assert!(
-        stderr
-            .contains("error: agent 'ghost' is not defined in the global config ([agents] table)"),
+        stderr.contains("unexpected argument '--ghost' found"),
         "{stderr}"
     );
     assert!(!project.join(".agents").exists());

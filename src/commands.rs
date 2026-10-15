@@ -42,26 +42,72 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
         Commands::Add {
             skills,
             agent,
+            opencode,
+            claude,
+            codex,
+            pi,
+            cursor,
             dir,
             pin,
             force,
             dry_run,
-        } => add_skills(
-            out,
-            &skills,
-            install::AddOptions {
-                dir,
-                agent,
-                pin,
-                force,
-            },
-            dry_run,
-        ),
+        } => {
+            let config = config::load()?;
+            let targets = install::resolve_targets(
+                &config,
+                install::TargetFlags {
+                    agent,
+                    opencode,
+                    claude,
+                    codex,
+                    pi,
+                    cursor,
+                },
+                dir.as_deref(),
+            )?;
+            add_skills(
+                out,
+                &skills,
+                install::AddOptions {
+                    targets,
+                    pin,
+                    force,
+                },
+                dry_run,
+            )
+        }
         Commands::Remove {
             skills,
+            agent,
+            opencode,
+            claude,
+            codex,
+            pi,
+            cursor,
+            dir,
             force,
             dry_run,
-        } => remove_skills(out, &skills, install::RemoveOptions { force }, dry_run),
+        } => {
+            let config = config::load()?;
+            let targets = install::resolve_remove_targets(
+                &config,
+                install::TargetFlags {
+                    agent,
+                    opencode,
+                    claude,
+                    codex,
+                    pi,
+                    cursor,
+                },
+                dir.as_deref(),
+            )?;
+            remove_skills(
+                out,
+                &skills,
+                install::RemoveOptions { targets, force },
+                dry_run,
+            )
+        }
         Commands::Status => status_cmd(out),
         Commands::Sync { force, dry_run } => sync_cmd(out, force, dry_run),
         Commands::Projects => projects_cmd(out),

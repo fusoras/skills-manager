@@ -33,10 +33,25 @@ pub enum Commands {
         /// Skill names to install
         #[arg(required = true, value_name = "SKILL")]
         skills: Vec<String>,
-        /// Install into the target directory of this agent
-        #[arg(long, value_name = "NAME")]
-        agent: Option<String>,
-        /// Install into this directory instead of the resolved target
+        /// Install into .agents/skills (default)
+        #[arg(long, alias = "agents")]
+        agent: bool,
+        /// Install into .opencode/skills
+        #[arg(long)]
+        opencode: bool,
+        /// Install into .claude/skills
+        #[arg(long)]
+        claude: bool,
+        /// Install into .codex/skills
+        #[arg(long)]
+        codex: bool,
+        /// Install into .pi/skills
+        #[arg(long)]
+        pi: bool,
+        /// Install into .cursor/skills
+        #[arg(long)]
+        cursor: bool,
+        /// Install into this custom directory
         #[arg(long, value_name = "PATH")]
         dir: Option<String>,
         /// Pin the copies, so later syncs leave them alone
@@ -54,6 +69,27 @@ pub enum Commands {
         /// Skill names to remove
         #[arg(required = true, value_name = "SKILL")]
         skills: Vec<String>,
+        /// Remove from .agents/skills
+        #[arg(long, alias = "agents")]
+        agent: bool,
+        /// Remove from .opencode/skills
+        #[arg(long)]
+        opencode: bool,
+        /// Remove from .claude/skills
+        #[arg(long)]
+        claude: bool,
+        /// Remove from .codex/skills
+        #[arg(long)]
+        codex: bool,
+        /// Remove from .pi/skills
+        #[arg(long)]
+        pi: bool,
+        /// Remove from .cursor/skills
+        #[arg(long)]
+        cursor: bool,
+        /// Remove from this custom directory
+        #[arg(long, value_name = "PATH")]
+        dir: Option<String>,
         /// Delete copies that were modified
         #[arg(long)]
         force: bool,
@@ -204,6 +240,11 @@ mod tests {
         let Commands::Add {
             skills,
             agent,
+            opencode,
+            claude,
+            codex,
+            pi,
+            cursor,
             dir,
             pin,
             force,
@@ -213,21 +254,30 @@ mod tests {
             panic!("expected `add`");
         };
         assert_eq!(skills, ["alpha", "beta"]);
-        assert!(agent.is_none() && dir.is_none());
+        assert!(!agent && !opencode && !claude && !codex && !pi && !cursor);
+        assert!(dir.is_none());
         assert!(!pin && !force && !dry_run);
 
         let Commands::Add {
             skills,
             agent,
+            opencode,
+            claude,
+            codex,
+            pi,
             dir,
             pin,
             force,
             dry_run,
+            ..
         } = parse(&[
             "add",
             "alpha",
             "--agent",
-            "opencode",
+            "--opencode",
+            "--claude",
+            "--codex",
+            "--pi",
             "--dir",
             "custom/skills",
             "--pin",
@@ -239,7 +289,7 @@ mod tests {
             panic!("expected `add`");
         };
         assert_eq!(skills, ["alpha"]);
-        assert_eq!(agent.as_deref(), Some("opencode"));
+        assert!(agent && opencode && claude && codex && pi);
         assert_eq!(dir.as_deref(), Some("custom/skills"));
         assert!(pin && force && dry_run);
     }
@@ -261,6 +311,7 @@ mod tests {
             skills,
             force,
             dry_run,
+            ..
         } = parse(&["remove", "alpha"]).command
         else {
             panic!("expected `remove`");

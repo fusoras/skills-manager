@@ -57,6 +57,106 @@ pub fn candidate(config: &Config, name: &str) -> Result<Candidate> {
     })
 }
 
+/// Target flags specified on the command line.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TargetFlags {
+    pub agent: bool,
+    pub opencode: bool,
+    pub claude: bool,
+    pub codex: bool,
+    pub pi: bool,
+    pub cursor: bool,
+}
+
+impl TargetFlags {
+    /// Returns `true` if any agent flag was specified.
+    pub fn any(self) -> bool {
+        self.agent || self.opencode || self.claude || self.codex || self.pi || self.cursor
+    }
+}
+
+/// Resolve the install targets for this command.
+///
+/// If any agent flag or `--dir` is specified, those targets are returned.
+/// If no target flag is specified, it defaults to `--agent` (`.agents/skills`, or `config.default_target`).
+pub fn resolve_targets(
+    config: &Config,
+    flags: TargetFlags,
+    dir: Option<&str>,
+) -> Result<Vec<String>> {
+    let mut targets = Vec::new();
+    if flags.agent {
+        targets.push(config.agent_target("agent"));
+    }
+    if flags.opencode {
+        targets.push(config.agent_target("opencode"));
+    }
+    if flags.claude {
+        targets.push(config.agent_target("claude"));
+    }
+    if flags.codex {
+        targets.push(config.agent_target("codex"));
+    }
+    if flags.pi {
+        targets.push(config.agent_target("pi"));
+    }
+    if flags.cursor {
+        targets.push(config.agent_target("cursor"));
+    }
+    if let Some(dir) = dir {
+        if dir.trim().is_empty() {
+            bail!("--dir must not be empty");
+        }
+        targets.push(dir.to_owned());
+    }
+    if targets.is_empty() {
+        targets.push(config.agent_target("agent"));
+    }
+    targets.dedup();
+    Ok(targets)
+}
+
+/// Resolve targets for `skm remove`.
+///
+/// If no target flag is given, an empty list is returned (signaling "remove from all targets").
+/// If target flags are given, only those specific targets are returned.
+pub fn resolve_remove_targets(
+    config: &Config,
+    flags: TargetFlags,
+    dir: Option<&str>,
+) -> Result<Vec<String>> {
+    if !flags.any() && dir.is_none() {
+        return Ok(Vec::new());
+    }
+    let mut targets = Vec::new();
+    if flags.agent {
+        targets.push(config.agent_target("agent"));
+    }
+    if flags.opencode {
+        targets.push(config.agent_target("opencode"));
+    }
+    if flags.claude {
+        targets.push(config.agent_target("claude"));
+    }
+    if flags.codex {
+        targets.push(config.agent_target("codex"));
+    }
+    if flags.pi {
+        targets.push(config.agent_target("pi"));
+    }
+    if flags.cursor {
+        targets.push(config.agent_target("cursor"));
+    }
+    if let Some(dir) = dir {
+        if dir.trim().is_empty() {
+            bail!("--dir must not be empty");
+        }
+        targets.push(dir.to_owned());
+    }
+    targets.dedup();
+    Ok(targets)
+}
+
 /// Resolve the install target for this command.
 ///
 /// `--dir` wins over `--agent`, which wins over the project's recorded target,
@@ -74,9 +174,7 @@ pub fn resolve_target(
         return Ok(dir.to_owned());
     }
     if let Some(agent) = agent {
-        return config.agents.get(agent).cloned().with_context(|| {
-            format!("agent '{agent}' is not defined in the global config ([agents] table)")
-        });
+        return Ok(config.agent_target(agent));
     }
     if let Some(target) = project.record.target.as_deref()
         && !target.trim().is_empty()
@@ -135,10 +233,8 @@ impl Action {
 /// Options of `skm add`.
 #[derive(Debug, Clone, Default)]
 pub struct AddOptions {
-    /// Explicit target directory.
-    pub dir: Option<String>,
-    /// Target directory of a configured agent.
-    pub agent: Option<String>,
+    /// Target directories to install into.
+    pub targets: Vec<String>,
     /// Pin the installed copies.
     pub pin: bool,
     /// Overwrite local modifications.
@@ -175,12 +271,11 @@ pub fn plan_add(
     names: &[String],
     options: &AddOptions,
 ) -> Result<Vec<AddPlan>> {
-    let target = resolve_target(
-        config,
-        project,
-        options.dir.as_deref(),
-        options.agent.as_deref(),
-    )?;
+    let targets = if options.targets.is_empty() {
+        vec![config.agent_target("agent")]
+    } else {
+        options.targets.clone()
+    };
     let root = project.root();
     let now = registry::now_epoch();
     let mut plans = Vec::new();
@@ -193,52 +288,55 @@ pub fn plan_add(
         seen.push(name);
 
         let candidate = candidate(config, name)?;
-        let dest_dir = target_dir(root, &target).join(&candidate.skill.name);
-        let dest_rel = skill::relative_path(&dest_dir, root);
-        let existing = project
-            .record
-            .get(&candidate.skill.name, &target)
-            .filter(|entry| !entry.detached);
 
-        let dest_exists = dest_dir.exists();
-        let action = match existing {
-            Some(entry) if dest_exists => {
-                let current = hash::tree_hash(&dest_dir)?;
-                if current != entry.written_hash && !options.force {
-                    bail!(
-                        "skill '{name}' was modified in {dest_rel}; pass --force to overwrite it or run `skm remove {name}`"
-                    );
+        for target in &targets {
+            let dest_dir = target_dir(root, target).join(&candidate.skill.name);
+            let dest_rel = skill::relative_path(&dest_dir, root);
+            let existing = project
+                .record
+                .get(&candidate.skill.name, target)
+                .filter(|entry| !entry.detached);
+
+            let dest_exists = dest_dir.exists();
+            let action = match existing {
+                Some(entry) if dest_exists => {
+                    let current = hash::tree_hash(&dest_dir)?;
+                    if current != entry.written_hash && !options.force {
+                        bail!(
+                            "skill '{name}' was modified in {dest_rel}; pass --force to overwrite it or run `skm remove {name}`"
+                        );
+                    }
+                    if current != entry.written_hash {
+                        Action::Replace
+                    } else {
+                        Action::Resync
+                    }
                 }
-                if current != entry.written_hash {
-                    Action::Replace
-                } else {
-                    Action::Resync
-                }
-            }
-            None if dest_exists && !options.force => bail!(
-                "{dest_rel} already exists but is not managed by skm; pass --force to overwrite it"
-            ),
-            None if dest_exists => Action::Replace,
-            _ => Action::Install,
-        };
+                None if dest_exists && !options.force => bail!(
+                    "{dest_rel} already exists but is not managed by skm; pass --force to overwrite it"
+                ),
+                None if dest_exists => Action::Replace,
+                _ => Action::Install,
+            };
 
-        let pinned = options.pin || existing.is_some_and(|entry| entry.pinned);
-        let installed_at = match (action, existing) {
-            (Action::Resync, Some(entry)) => entry.installed_at,
-            _ => now,
-        };
+            let pinned = options.pin || existing.is_some_and(|entry| entry.pinned);
+            let installed_at = match (action, existing) {
+                (Action::Resync, Some(entry)) => entry.installed_at,
+                _ => now,
+            };
 
-        plans.push(AddPlan {
-            skill: candidate.skill.name.clone(),
-            source_dir: candidate.source_dir(),
-            source_rel: candidate.skill.rel_path.clone(),
-            target: target.clone(),
-            dest_dir,
-            dest_rel,
-            action,
-            pinned,
-            installed_at,
-        });
+            plans.push(AddPlan {
+                skill: candidate.skill.name.clone(),
+                source_dir: candidate.source_dir(),
+                source_rel: candidate.skill.rel_path.clone(),
+                target: target.clone(),
+                dest_dir,
+                dest_rel,
+                action,
+                pinned,
+                installed_at,
+            });
+        }
     }
     Ok(plans)
 }
@@ -293,6 +391,8 @@ impl RemoveAction {
 /// Options of `skm remove`.
 #[derive(Debug, Clone, Default)]
 pub struct RemoveOptions {
+    /// Specific targets to remove from (empty means all targets).
+    pub targets: Vec<String>,
     /// Delete copies that were modified.
     pub force: bool,
 }
@@ -338,7 +438,10 @@ pub fn plan_remove(
         }
         seen.push(name);
 
-        let entries = project.record.get_all(name);
+        let mut entries = project.record.get_all(name);
+        if !options.targets.is_empty() {
+            entries.retain(|e| options.targets.contains(&e.target));
+        }
 
         if entries.is_empty() {
             bail!("skill '{name}' is not registered in this project");

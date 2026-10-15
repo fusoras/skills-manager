@@ -148,3 +148,26 @@ fn remove_works_when_the_copy_was_already_deleted_by_hand() {
     assert_clean_project(&project);
     assert!(!sandbox.registry_text().contains("name = \"alpha\""));
 }
+
+#[test]
+fn remove_with_agent_flags_removes_only_from_specified_target() {
+    let (sandbox, _store, project) = ready();
+    stdout_of(
+        sandbox
+            .skm_in(&project)
+            .args(["add", "alpha", "--opencode", "--pi"]),
+    );
+    assert!(project.join(".opencode/skills/alpha").exists());
+    assert!(project.join(".pi/skills/alpha").exists());
+
+    // Remove only from --pi
+    let output = stdout_of(sandbox.skm_in(&project).args(["remove", "alpha", "--pi"]));
+    assert_eq!(output, "Removed alpha (.pi/skills/alpha)\n");
+    assert!(!project.join(".pi/skills/alpha").exists());
+    assert!(project.join(".opencode/skills/alpha").exists());
+
+    // Registry still has the opencode copy
+    let registry = sandbox.registry_text();
+    assert!(registry.contains(".opencode/skills"));
+    assert!(!registry.contains(".pi/skills"));
+}
