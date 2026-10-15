@@ -28,9 +28,11 @@ The global configuration lives at `<user config dir>/skm/config.toml`
 (on Linux: `~/.config/skm/config.toml`, or `$XDG_CONFIG_HOME/skm/config.toml`).
 `skm config path` prints it and `skm config show` prints the current TOML — when
 the file does not exist, `show` prints the in-memory defaults without writing
-anything. The store path is saved exactly as typed (so `~/skills-store` stays
-readable) and expanded only when used. Updates preserve your comments and
-formatting.
+anything. `skm store add` normalizes the path before saving it: a directory
+inside your home is stored as `~/...` (so `~/skills-store` stays readable and
+portable), anything else as an absolute path — a relative path is resolved from
+the working directory first. `~` is expanded whenever the store is used. Updates
+preserve your comments and formatting.
 
 ```toml
 store = "~/skills-store"           # optional until `skm store add` registers one

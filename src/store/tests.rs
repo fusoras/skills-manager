@@ -51,6 +51,57 @@ fn expand_tilde_with_leaves_other_forms_untouched() {
 }
 
 #[test]
+fn normalize_store_path_with_uses_the_tilde_form_inside_the_home() {
+    let home = Path::new("/home/tester");
+    let cwd = Path::new("/work");
+    assert_eq!(
+        normalize_store_path_with(Some(home), cwd, "~/skills-store"),
+        "~/skills-store"
+    );
+    assert_eq!(
+        normalize_store_path_with(Some(home), cwd, "/home/tester/skills-store"),
+        "~/skills-store"
+    );
+    assert_eq!(normalize_store_path_with(Some(home), cwd, "~"), "~");
+    assert_eq!(
+        normalize_store_path_with(Some(home), cwd, "/home/tester"),
+        "~"
+    );
+}
+
+#[test]
+fn normalize_store_path_with_resolves_relatives_against_the_working_directory() {
+    let home = Path::new("/home/tester");
+    assert_eq!(
+        normalize_store_path_with(Some(home), Path::new("/home/tester"), "store"),
+        "~/store"
+    );
+    assert_eq!(
+        normalize_store_path_with(Some(home), Path::new("/work"), "./store"),
+        "/work/store"
+    );
+    assert_eq!(
+        normalize_store_path_with(Some(home), Path::new("/home/tester/projects"), "../store"),
+        "~/store"
+    );
+}
+
+#[test]
+fn normalize_store_path_with_keeps_outside_paths_absolute() {
+    let home = Path::new("/home/tester");
+    let cwd = Path::new("/work");
+    assert_eq!(
+        normalize_store_path_with(Some(home), cwd, "/srv/store"),
+        "/srv/store"
+    );
+    // A sibling of the home is not inside it, even with a shared prefix.
+    assert_eq!(
+        normalize_store_path_with(Some(home), cwd, "/home/tester-other/store"),
+        "/home/tester-other/store"
+    );
+}
+
+#[test]
 fn detect_layout_requires_a_skills_directory() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("store");

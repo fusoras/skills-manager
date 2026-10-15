@@ -96,11 +96,54 @@ fn store_add_expands_tilde_and_keeps_the_path_as_written() {
         .args(["store", "add", &absolute.to_string_lossy()])
         .assert()
         .success()
-        .stdout(format!(
-            "store already registered: {}\n",
-            absolute.display()
-        ));
+        .stdout("store already registered: ~/skills-store\n");
     assert_eq!(sandbox.config_text(), "store = \"~/skills-store\"\n");
+}
+#[test]
+fn store_add_saves_an_absolute_path_under_home_as_tilde() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.home.join("skills-store");
+    fs::create_dir_all(&store).expect("create store dir");
+
+    sandbox
+        .skm()
+        .args(["store", "add", &store.to_string_lossy()])
+        .assert()
+        .success()
+        .stdout(format!("store = ~/skills-store -> {}\n", store.display()));
+    assert_eq!(sandbox.config_text(), "store = \"~/skills-store\"\n");
+}
+#[test]
+fn store_add_resolves_a_relative_path_against_the_working_directory() {
+    let sandbox = Sandbox::new();
+    // `skm` runs from the sandbox root, so `home/store` is inside the fake home.
+    let store = sandbox.home.join("store");
+    fs::create_dir_all(&store).expect("create store dir");
+
+    sandbox
+        .skm()
+        .args(["store", "add", "home/store"])
+        .assert()
+        .success()
+        .stdout(format!("store = ~/store -> {}\n", store.display()));
+    assert_eq!(sandbox.config_text(), "store = \"~/store\"\n");
+}
+#[test]
+fn store_add_saves_a_path_outside_home_as_absolute() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.path("outside-store");
+    fs::create_dir_all(&store).expect("create store dir");
+
+    sandbox
+        .skm()
+        .args(["store", "add", &store.to_string_lossy()])
+        .assert()
+        .success()
+        .stdout(format!("store = {}\n", store.display()));
+    assert_eq!(
+        sandbox.config_text(),
+        format!("store = \"{}\"\n", store.display())
+    );
 }
 #[test]
 fn store_add_replaces_the_previous_store_and_mentions_it() {

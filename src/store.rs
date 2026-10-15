@@ -7,13 +7,15 @@
 //! * `flat`: skills are direct subdirectories of the store root (hidden entries and
 //!   `packs/` are ignored).
 //!
-//! The path is stored exactly as the user typed it (so `~/store` stays readable)
-//! and expanded only when it is used.
+//! The path is normalized when registered: a directory inside the user's home is
+//! stored as `~/...` (readable and portable), anything else as an absolute path.
+//! `~` is expanded whenever the store is used.
 
+use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
@@ -65,6 +67,58 @@ pub fn expand_tilde_with(home: Option<&Path>, input: &str) -> PathBuf {
     PathBuf::from(input)
 }
 
+/// Normalize a user-supplied store path into the portable form persisted in the
+/// configuration.
+///
+/// The path is made absolute (`~` expanded, relative paths resolved against the
+/// current directory) and then, when it lies inside the user's home, rewritten
+/// as `~/...`; anything else is kept absolute. `~` is expanded again whenever
+/// the store is used, so the stored value stays correct from any working
+/// directory and on any machine.
+pub fn normalize_store_path(input: &str) -> Result<String> {
+    let cwd = env::current_dir().context("cannot determine the current directory")?;
+    Ok(normalize_store_path_with(
+        dirs::home_dir().as_deref(),
+        &cwd,
+        input,
+    ))
+}
+
+/// [`normalize_store_path`] with an explicit home and working directory, for
+/// callers and tests.
+pub fn normalize_store_path_with(home: Option<&Path>, cwd: &Path, input: &str) -> String {
+    let expanded = expand_tilde_with(home, input);
+    let absolute = lexical_normalize(&if expanded.is_absolute() {
+        expanded
+    } else {
+        cwd.join(expanded)
+    });
+
+    match home.and_then(|home| absolute.strip_prefix(home).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(rest) => format!("~/{}", rest.to_string_lossy()),
+        None => absolute.to_string_lossy().into_owned(),
+    }
+}
+
+/// Resolve `.` and `..` without touching the filesystem, so it also works for
+/// paths that do not exist yet.
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
 /// Layout of a store root: `catalog` when `<root>/skills/` is a directory.
 pub fn detect_layout(root: &Path) -> Layout {
     if root.join(SKILLS_SUBDIR).is_dir() {
@@ -104,9 +158,10 @@ pub struct ScanReport {
 /// Outcome of `skm store add`.
 #[derive(Debug, Clone)]
 pub struct AddOutcome {
-    /// Path as written by the user in this run.
+    /// Normalized path persisted in the configuration (`~/...` under the home,
+    /// absolute otherwise).
     pub path: String,
-    /// Tilde-expanded path.
+    /// Tilde-expanded, absolute path.
     pub resolved: PathBuf,
     /// The same path was already registered: nothing changed.
     pub unchanged: bool,
@@ -152,15 +207,18 @@ pub fn scan(path_as_written: &str) -> Result<ScanReport> {
 
 /// Register the global store, creating its directory when `create` is set.
 ///
-/// The path is persisted exactly as written and resolved here is returned.
-/// Registering the path that is already registered changes nothing; any other
-/// path replaces the previous store.
+/// The user's path is normalized before it is persisted: made absolute (`~`
+/// expanded, relative resolved against the current directory) and rewritten as
+/// `~/...` when inside the home, otherwise kept absolute. Registering the path
+/// that is already registered changes nothing; any other path replaces the
+/// previous store.
 pub fn add(path_as_written: &str, create: bool) -> Result<AddOutcome> {
     if path_as_written.trim().is_empty() {
         bail!("store path must not be empty");
     }
 
-    let resolved = expand_tilde(path_as_written);
+    let stored = normalize_store_path(path_as_written)?;
+    let resolved = expand_tilde(&stored);
     let current = config::load()?;
     let registered = current
         .store
@@ -169,13 +227,13 @@ pub fn add(path_as_written: &str, create: bool) -> Result<AddOutcome> {
 
     // Validate the path before touching the file: a rejected path must not
     // leave a newly created directory or a rewritten config behind.
-    ensure_directory(path_as_written, &resolved, create)?;
+    ensure_directory(&stored, &resolved, create)?;
 
     if let Some((existing, existing_resolved)) = &registered
-        && (existing == path_as_written || *existing_resolved == resolved)
+        && (existing == &stored || *existing_resolved == resolved)
     {
         return Ok(AddOutcome {
-            path: path_as_written.to_owned(),
+            path: stored,
             resolved,
             unchanged: true,
             replaced: None,
@@ -183,11 +241,11 @@ pub fn add(path_as_written: &str, create: bool) -> Result<AddOutcome> {
     }
 
     config::update(|document| {
-        config::doc_set_store(document, path_as_written);
+        config::doc_set_store(document, &stored);
         Ok(())
     })?;
     Ok(AddOutcome {
-        path: path_as_written.to_owned(),
+        path: stored,
         resolved,
         unchanged: false,
         replaced: registered.map(|(existing, _)| existing),
@@ -210,14 +268,14 @@ pub fn remove() -> Result<String> {
 }
 
 /// Ensure the store path is an existing directory, creating it on `--create`.
-fn ensure_directory(path_as_written: &str, resolved: &Path, create: bool) -> Result<()> {
+fn ensure_directory(label: &str, resolved: &Path, create: bool) -> Result<()> {
     if !resolved.exists() {
         if !create {
-            bail!("path does not exist: {path_as_written} (pass --create to create it)");
+            bail!("path does not exist: {label} (pass --create to create it)");
         }
         fs::create_dir_all(resolved).with_context(|| format!("creating {}", resolved.display()))?;
     } else if !resolved.is_dir() {
-        bail!("path is not a directory: {path_as_written}");
+        bail!("path is not a directory: {label}");
     }
     Ok(())
 }
