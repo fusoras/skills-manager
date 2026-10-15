@@ -1,0 +1,5 @@
+/target
+.codegraph/
+
+# `skm` local state: generated, never committed (see README)
+/.skills-manager/

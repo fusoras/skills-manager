@@ -1,0 +1,40 @@
+[package]
+name = "skills-manager"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Manage skills (directories with a SKILL.md) from local stores into projects"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "skm"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+blake3 = "1.8.7"
+clap = { version = "4", features = ["derive"] }
+dirs = "7"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+toml_edit = "0.25"
+walkdir = "2.5.0"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
