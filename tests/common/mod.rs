@@ -1,7 +1,7 @@
 //! Shared sandbox and helpers for the `skm` end-to-end tests.
 //!
-//! Every test runs the real binary with `XDG_CONFIG_HOME` and `HOME` pointing into a
-//! temporary sandbox, so the user's real configuration is never read nor written.
+//! Every test runs the real binary with `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `HOME`
+//! pointing into a temporary sandbox, so the user's real configuration is never read nor written.
 //! The helpers are shared by several test binaries, hence the dead-code allowance.
 
 #![allow(dead_code)]
@@ -12,11 +12,12 @@ use std::path::{Path, PathBuf};
 use assert_cmd::Command;
 use tempfile::TempDir;
 
-/// Temporary directory holding an isolated config directory, home and stores.
+/// Temporary directory holding an isolated config directory, state home and stores.
 pub struct Sandbox {
     _tmp: TempDir,
     pub root: PathBuf,
     config_home: PathBuf,
+    state_home: PathBuf,
     pub home: PathBuf,
 }
 
@@ -25,13 +26,16 @@ impl Sandbox {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let root = tmp.path().to_path_buf();
         let config_home = root.join("config");
+        let state_home = root.join("state");
         let home = root.join("home");
         fs::create_dir_all(&config_home).expect("create config home");
+        fs::create_dir_all(&state_home).expect("create state home");
         fs::create_dir_all(&home).expect("create fake home");
         Self {
             _tmp: tmp,
             root,
             config_home,
+            state_home,
             home,
         }
     }
@@ -41,6 +45,7 @@ impl Sandbox {
         let mut command = Command::cargo_bin("skm").expect("skm binary");
         command
             .env("XDG_CONFIG_HOME", &self.config_home)
+            .env("XDG_STATE_HOME", &self.state_home)
             .env("HOME", &self.home)
             .env("NO_COLOR", "1")
             .current_dir(&self.root);
@@ -63,6 +68,20 @@ impl Sandbox {
         let path = self.config_file();
         fs::create_dir_all(path.parent().expect("config parent")).expect("create config dir");
         fs::write(path, text).expect("write config file");
+    }
+
+    pub fn registry_file(&self) -> PathBuf {
+        self.state_home.join("skm").join("projects.toml")
+    }
+
+    pub fn registry_text(&self) -> String {
+        fs::read_to_string(self.registry_file()).unwrap_or_default()
+    }
+
+    pub fn write_registry(&self, text: &str) {
+        let path = self.registry_file();
+        fs::create_dir_all(path.parent().expect("registry parent")).expect("create registry dir");
+        fs::write(path, text).expect("write registry file");
     }
 
     /// Create `<store>/<directory>/SKILL.md`.
@@ -191,14 +210,18 @@ pub fn read(path: &Path) -> String {
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()))
 }
 
-/// Manifest path inside a project directory.
-pub fn manifest_of(project: &Path) -> PathBuf {
-    project.join("skills.toml")
-}
-
-/// State file path inside a project directory.
-pub fn state_of(project: &Path) -> PathBuf {
-    project.join(".skills-manager").join("state.toml")
+/// Assert that a project directory contains ZERO skm metadata files.
+pub fn assert_clean_project(project: &Path) {
+    assert!(
+        !project.join("skills.toml").exists(),
+        "skills.toml must NEVER exist inside project: {}",
+        project.display()
+    );
+    assert!(
+        !project.join(".skills-manager").exists(),
+        ".skills-manager must NEVER exist inside project: {}",
+        project.display()
+    );
 }
 
 /// Value of the `key = "value"` line of a TOML document.

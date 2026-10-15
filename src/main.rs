@@ -1,10 +1,8 @@
 //! `skm` - manage skills (directories with a `SKILL.md`) from local stores.
 //!
-//! M0 covers the global configuration and the `store` commands; M1 adds
-//! `add` / `remove` / `status`, which copy skills into a project as real files
-//! and record what was written in `.skills-manager/state.toml`; M2 adds `sync`,
-//! which reconciles those copies with the stores, keeps pinned ones untouched and
-//! detaches locally modified ones. Packs and watch mode come later.
+//! Stores skills from a local store into projects with ZERO pollution in target projects:
+//! no `skills.toml`, no `.skills-manager/` directory. All project metadata is tracked
+//! centrally in the user state directory (`~/.local/state/skm/projects.toml`).
 
 mod cli;
 mod commands;
@@ -13,11 +11,10 @@ mod doc;
 mod fsops;
 mod hash;
 mod install;
-mod manifest;
 mod output;
 mod project;
+mod registry;
 mod skill;
-mod state;
 mod status;
 mod store;
 mod sync;

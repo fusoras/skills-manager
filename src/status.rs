@@ -1,4 +1,4 @@
-//! `skm status`: what a project declares, what is installed and what changed.
+//! `skm status`: what is registered, what is installed and what changed.
 //!
 //! Status is strictly read only: it hashes directories to classify them, but
 //! never writes a hash, a file or a directory.
@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::hash;
 use crate::install::{installed_dir, resolve_target, target_dir};
 use crate::project::Project;
-use crate::state::SkillState;
+use crate::registry::SkillState;
 use crate::targets;
 
 /// Health of one copy, from the most to the least urgent.
@@ -25,11 +25,11 @@ pub enum Health {
     Behind,
     /// In sync and pinned, so later syncs leave it alone.
     Pinned,
-    /// Declared or recorded, but absent from disk.
+    /// Registered, but absent from disk.
     Missing,
-    /// A directory in a target that neither the manifest nor the state knows.
+    /// A directory in a target that the central registry does not know.
     Unmanaged,
-    /// A local fork: the declaration was dropped and sync never touches it.
+    /// A local fork: sync never touches it.
     Detached,
     /// In sync locally, but with no registered store to compare against.
     Skipped,
@@ -70,33 +70,25 @@ pub struct StatusRow {
     pub health: Health,
 }
 
-/// Every declared skill plus every unmanaged directory, sorted by skill.
+/// Every registered skill plus every unmanaged directory, sorted by skill.
 pub fn rows(config: &Config, project: &Project) -> Result<Vec<StatusRow>> {
     let root = project.root();
     let default_target = resolve_target(config, project, None, None)?;
     let store_root = targets::store_root(config);
     let mut rows: Vec<StatusRow> = Vec::new();
 
-    // Declared skills, plus state entries the manifest no longer knows about.
     let mut subjects: Vec<(&str, bool)> = Vec::new();
-    for install in &project.manifest.install {
-        if let Some(name) = install.skill.as_deref() {
-            subjects.push((name, install.pin));
-        }
-    }
-    for entry in &project.state.skills {
-        let known = subjects.iter().any(|(name, _)| *name == entry.name);
-        if !known {
+    for entry in &project.record.skills {
+        if !subjects.iter().any(|(name, _)| *name == entry.name) {
             subjects.push((&entry.name, entry.pinned));
         }
     }
 
-    for (name, declared_pin) in subjects {
+    for (name, pinned) in subjects {
         for target in targets::state_targets(project, name, &default_target) {
             let dest_dir = installed_dir(root, &target, name);
-            let entry = project.state.get(name, &target);
-            // Pinned either in the manifest (declaration) or in the state (install).
-            let pinned = declared_pin || entry.is_some_and(|entry| entry.pinned);
+            let entry = project.record.get(name, &target);
+            let pinned = pinned || entry.is_some_and(|entry| entry.pinned);
             let health = health_of(store_root.as_deref(), &dest_dir, entry, pinned)?;
             rows.push(StatusRow {
                 skill: name.to_owned(),
@@ -134,10 +126,6 @@ pub fn rows(config: &Config, project: &Project) -> Result<Vec<StatusRow>> {
 }
 
 /// Health of one copy of a skill.
-///
-/// The local checks (missing, modified, detached, unmanaged) need nothing but
-/// the project; only `behind`, `pinned` and `ok` compare with the store, so a
-/// copy that passes every local check is `skipped` when no store is registered.
 fn health_of(
     store_root: Option<&Path>,
     dest_dir: &Path,
@@ -148,7 +136,7 @@ fn health_of(
         return Ok(Health::Missing);
     }
     let Some(entry) = entry else {
-        // The directory is there, but `skm` never wrote it.
+        // The directory is there, but `skm` does not manage it.
         return Ok(Health::Unmanaged);
     };
     if entry.detached {
@@ -184,8 +172,6 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::fsops;
-    use crate::project;
-    use crate::state::{self, State};
     use tempfile::TempDir;
 
     /// A store with one skill and an empty project.
@@ -201,7 +187,6 @@ mod tests {
             Self::with_store(true)
         }
 
-        /// [`Fixture::new`] with the store registered in the config or not.
         fn with_store(registered: bool) -> Self {
             let tmp = tempfile::tempdir().unwrap();
             let store = tmp.path().join("store");
@@ -224,12 +209,6 @@ mod tests {
             }
         }
 
-        /// Manifest declaring `alpha`.
-        fn manifest(&self) -> String {
-            "[[install]]\nskill = \"alpha\"\n".to_owned()
-        }
-
-        /// Copy the skill of the store into the project, as `skm add` would.
         fn install(&self, target: &str, pinned: bool) -> SkillState {
             let dest = self.project.join(target).join("alpha");
             fsops::copy_tree(&self.store.join("alpha"), &dest).unwrap();
@@ -245,21 +224,16 @@ mod tests {
             }
         }
 
-        /// Open the project with `manifest` and `entries` written to disk.
-        fn open(&self, manifest: &str, entries: &[SkillState]) -> Project {
-            fs::write(project::manifest_path(&self.project), manifest).unwrap();
-            if !entries.is_empty() {
-                let mut state = State::default();
-                for entry in entries {
-                    state.upsert(entry.clone());
-                }
-                state::save(&project::state_path(&self.project), &state).unwrap();
+        fn open(&self, entries: &[SkillState]) -> Project {
+            let mut project = Project::open_at(&self.project).unwrap();
+            for entry in entries {
+                project.record.upsert(entry.clone());
             }
-            Project::open_at(&self.project).unwrap()
+            project
         }
 
-        fn rows(&self, manifest: &str, entries: &[SkillState]) -> Vec<StatusRow> {
-            let project = self.open(manifest, entries);
+        fn rows(&self, entries: &[SkillState]) -> Vec<StatusRow> {
+            let project = self.open(entries);
             rows(&self.config, &project).unwrap()
         }
 
@@ -271,7 +245,13 @@ mod tests {
     #[test]
     fn declared_without_a_copy_is_missing() {
         let fixture = Fixture::new();
-        let rows = fixture.rows(&fixture.manifest(), &[]);
+        let entry = SkillState {
+            name: "alpha".to_owned(),
+            source_rel: "alpha".to_owned(),
+            target: ".agents/skills".to_owned(),
+            ..SkillState::default()
+        };
+        let rows = fixture.rows(&[entry]);
 
         assert_eq!(
             rows,
@@ -287,7 +267,7 @@ mod tests {
     fn an_untouched_copy_is_ok() {
         let fixture = Fixture::new();
         let entry = fixture.install(".agents/skills", false);
-        let rows = fixture.rows(&fixture.manifest(), &[entry]);
+        let rows = fixture.rows(&[entry]);
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].health, Health::Ok);
@@ -299,7 +279,7 @@ mod tests {
         let entry = fixture.install(".agents/skills", false);
         fs::write(fixture.dest().join("extra.md"), "local work\n").unwrap();
 
-        let rows = fixture.rows(&fixture.manifest(), &[entry]);
+        let rows = fixture.rows(&[entry]);
         assert_eq!(rows[0].health, Health::Modified);
     }
 
@@ -313,7 +293,7 @@ mod tests {
         )
         .unwrap();
 
-        let rows = fixture.rows(&fixture.manifest(), &[entry]);
+        let rows = fixture.rows(&[entry]);
         assert_eq!(rows[0].health, Health::Behind);
     }
 
@@ -323,7 +303,7 @@ mod tests {
         let entry = fixture.install(".agents/skills", false);
         fs::remove_dir_all(fixture.store.join("alpha")).unwrap();
 
-        let rows = fixture.rows(&fixture.manifest(), &[entry]);
+        let rows = fixture.rows(&[entry]);
         assert_eq!(rows[0].health, Health::Behind);
     }
 
@@ -332,12 +312,11 @@ mod tests {
         let fixture = Fixture::new();
         let entry = fixture.install(".agents/skills", true);
 
-        let rows = fixture.rows(&fixture.manifest(), std::slice::from_ref(&entry));
+        let rows = fixture.rows(std::slice::from_ref(&entry));
         assert_eq!(rows[0].health, Health::Pinned);
 
-        // A local edit is more urgent than the pin, and so is a store update.
         fs::write(fixture.dest().join("extra.md"), "local work\n").unwrap();
-        let rows = fixture.rows(&fixture.manifest(), std::slice::from_ref(&entry));
+        let rows = fixture.rows(std::slice::from_ref(&entry));
         assert_eq!(rows[0].health, Health::Modified);
 
         fs::remove_file(fixture.dest().join("extra.md")).unwrap();
@@ -346,18 +325,8 @@ mod tests {
             "name: alpha\nv2\n",
         )
         .unwrap();
-        let rows = fixture.rows(&fixture.manifest(), &[entry]);
+        let rows = fixture.rows(&[entry]);
         assert_eq!(rows[0].health, Health::Behind);
-    }
-
-    #[test]
-    fn the_manifest_pin_flag_marks_a_copy_as_pinned() {
-        let fixture = Fixture::new();
-        let entry = fixture.install(".agents/skills", false);
-        let manifest = format!("{}pin = true\n", fixture.manifest());
-
-        let rows = fixture.rows(&manifest, &[entry]);
-        assert_eq!(rows[0].health, Health::Pinned);
     }
 
     #[test]
@@ -366,7 +335,7 @@ mod tests {
         fs::create_dir_all(fixture.project.join(".agents/skills/rogue")).unwrap();
         fs::create_dir_all(fixture.project.join(".agents/skills/.git")).unwrap();
 
-        let rows = fixture.rows("", &[]);
+        let rows = fixture.rows(&[]);
 
         assert_eq!(
             rows,
@@ -382,23 +351,9 @@ mod tests {
     fn a_directory_skm_did_not_write_is_unmanaged() {
         let fixture = Fixture::new();
         let entry = fixture.install(".agents/skills", false);
-        // Same name, but a copy that was never recorded in the state.
-        let rows = fixture.rows(&fixture.manifest(), &[]);
+        let rows = fixture.rows(&[]);
         assert_eq!(rows[0].health, Health::Unmanaged);
         assert_eq!(entry.target, ".agents/skills");
-    }
-
-    #[test]
-    fn state_entries_the_manifest_lost_are_still_reported() {
-        let fixture = Fixture::new();
-        let entry = fixture.install(".agents/skills", false);
-
-        let rows = fixture.rows("", std::slice::from_ref(&entry));
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].skill, "alpha");
-        assert_eq!(rows[0].target, ".agents/skills");
-        assert_eq!(rows[0].health, Health::Ok);
     }
 
     #[test]
@@ -406,18 +361,16 @@ mod tests {
         let fixture = Fixture::with_store(false);
         let entry = fixture.install(".agents/skills", false);
 
-        // Locally untouched: the missing comparison is the only unknown.
-        let rows = fixture.rows(&fixture.manifest(), std::slice::from_ref(&entry));
+        let rows = fixture.rows(std::slice::from_ref(&entry));
         assert_eq!(rows[0].health, Health::Skipped);
         assert_eq!(rows[0].health.note(), Some("no store registered"));
 
-        // Local verdicts do not need the store and are still reported.
         fs::write(fixture.dest().join("extra.md"), "local work\n").unwrap();
-        let rows = fixture.rows(&fixture.manifest(), std::slice::from_ref(&entry));
+        let rows = fixture.rows(std::slice::from_ref(&entry));
         assert_eq!(rows[0].health, Health::Modified);
 
         fs::remove_dir_all(fixture.dest()).unwrap();
-        let rows = fixture.rows(&fixture.manifest(), &[entry]);
+        let rows = fixture.rows(&[entry]);
         assert_eq!(rows[0].health, Health::Missing);
     }
 
@@ -426,7 +379,7 @@ mod tests {
         let fixture = Fixture::new();
         let entry = fixture.install(".claude/skills", false);
 
-        let rows = fixture.rows(&fixture.manifest(), &[entry]);
+        let rows = fixture.rows(&[entry]);
         assert_eq!(rows[0].target, ".claude/skills");
         assert_eq!(rows[0].health, Health::Ok);
     }
@@ -440,19 +393,17 @@ mod tests {
             detached: true,
             ..fixture.install(".agents/skills", false)
         };
-        // The fork is a local edit of the installed copy.
         fs::write(fixture.dest().join("local.md"), "local work\n").unwrap();
 
-        let rows = fixture.rows("", std::slice::from_ref(&entry));
+        let rows = fixture.rows(std::slice::from_ref(&entry));
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].skill, "alpha");
         assert_eq!(rows[0].target, ".agents/skills");
         assert_eq!(rows[0].health, Health::Detached);
 
-        // A branch that disappeared is missing, not detached.
         fs::remove_dir_all(fixture.dest()).unwrap();
-        let rows = fixture.rows("", std::slice::from_ref(&entry));
+        let rows = fixture.rows(std::slice::from_ref(&entry));
         assert_eq!(rows[0].health, Health::Missing);
     }
 

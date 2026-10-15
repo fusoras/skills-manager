@@ -72,6 +72,8 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// List projects managed by skm on this machine
+    Projects,
 }
 
 /// Actions of `skm config`.

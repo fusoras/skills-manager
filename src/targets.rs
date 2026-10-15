@@ -12,10 +12,10 @@ use crate::config::Config;
 use crate::project::Project;
 use crate::store;
 
-/// Targets a declared skill may live in: what the state recorded, else the default.
+/// Targets a skill may live in: what the project record saved, else the default.
 pub fn state_targets(project: &Project, name: &str, default_target: &str) -> Vec<String> {
     let mut targets: Vec<String> = project
-        .state
+        .record
         .skills
         .iter()
         .filter(|entry| entry.name == name)
@@ -32,7 +32,7 @@ pub fn state_targets(project: &Project, name: &str, default_target: &str) -> Vec
 /// Every target worth looking at for unmanaged directories.
 pub fn known_targets(project: &Project, default_target: &str) -> Vec<String> {
     let mut targets: Vec<String> = project
-        .state
+        .record
         .targets()
         .iter()
         .map(|target| (*target).to_owned())
@@ -67,19 +67,14 @@ pub fn store_root(config: &Config) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{self, SkillState, State};
+    use crate::registry::SkillState;
 
-    /// An empty project with `entries` written to its state file.
     fn project_with(entries: Vec<SkillState>) -> (tempfile::TempDir, Project) {
         let tmp = tempfile::tempdir().unwrap();
-        if !entries.is_empty() {
-            state::save(
-                &crate::project::state_path(tmp.path()),
-                &State { skills: entries },
-            )
-            .unwrap();
+        let mut project = Project::open_at(tmp.path()).unwrap();
+        for entry in entries {
+            project.record.upsert(entry);
         }
-        let project = Project::open_at(tmp.path()).unwrap();
         (tmp, project)
     }
 
@@ -104,52 +99,54 @@ mod tests {
     #[test]
     fn state_targets_uses_the_recorded_targets_of_that_skill_only() {
         let (_tmp, project) = project_with(vec![
-            entry("alpha", "custom/skills"),
-            entry("alpha", "custom/skills"),
-            entry("beta", "other-target"),
+            entry("alpha", "custom/one"),
+            entry("alpha", "custom/two"),
+            entry("beta", "custom/three"),
         ]);
 
         assert_eq!(
             state_targets(&project, "alpha", ".agents/skills"),
-            ["custom/skills"]
-        );
-        assert_eq!(
-            state_targets(&project, "beta", ".agents/skills"),
-            ["other-target"]
+            ["custom/one", "custom/two"]
         );
     }
 
     #[test]
     fn known_targets_unions_the_state_and_the_default() {
-        let (_tmp, project) = project_with(vec![entry("alpha", "custom/skills")]);
+        let (_tmp, project) = project_with(vec![
+            entry("alpha", "custom/one"),
+            entry("beta", "custom/two"),
+        ]);
 
         assert_eq!(
             known_targets(&project, ".agents/skills"),
-            [".agents/skills", "custom/skills"]
+            [".agents/skills", "custom/one", "custom/two"]
         );
     }
 
     #[test]
     fn subdirectories_is_sorted_and_skips_hidden_entries_and_files() {
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join("zulu")).unwrap();
-        fs::create_dir_all(tmp.path().join("alpha")).unwrap();
-        fs::create_dir_all(tmp.path().join(".hidden")).unwrap();
-        fs::write(tmp.path().join("loose.md"), "").unwrap();
+        let dir = tmp.path();
+        fs::create_dir_all(dir.join("zebra")).unwrap();
+        fs::create_dir_all(dir.join("alpha")).unwrap();
+        fs::create_dir_all(dir.join(".hidden")).unwrap();
+        fs::write(dir.join("file.txt"), "hello").unwrap();
 
-        assert_eq!(subdirectories(tmp.path()).unwrap(), ["alpha", "zulu"]);
+        assert_eq!(
+            subdirectories(dir).unwrap(),
+            vec!["alpha".to_owned(), "zebra".to_owned()]
+        );
     }
 
     #[test]
     fn store_root_follows_the_registered_config_path() {
         let config = Config {
-            store: Some("~/folder-skills".to_owned()),
+            store: Some("/tmp/store".to_owned()),
             ..Config::default()
         };
-        assert_eq!(
-            store_root(&config),
-            Some(store::expand_tilde("~/folder-skills"))
-        );
-        assert_eq!(store_root(&Config::default()), None);
+        assert_eq!(store_root(&config), Some(PathBuf::from("/tmp/store")));
+
+        let empty = Config::default();
+        assert_eq!(store_root(&empty), None);
     }
 }

@@ -4,8 +4,8 @@
 //! afterwards ([`apply_add`] / [`apply_remove`]), so validation failures never
 //! leave the project half modified.
 //!
-//! Skills come from the global store (a single directory registered in the
-//! global configuration), so a name is never ambiguous.
+//! Projects remain 100% clean: metadata is persisted exclusively in the
+//! central registry (`~/.local/state/skm/projects.toml`).
 
 use std::path::{Path, PathBuf};
 
@@ -14,10 +14,9 @@ use anyhow::{Context, Result, bail};
 use crate::config::Config;
 use crate::fsops;
 use crate::hash;
-use crate::manifest::{self, Install};
-use crate::project::{MANIFEST_FILE, Project};
+use crate::project::Project;
+use crate::registry::{self, SkillState};
 use crate::skill::{self, Skill};
-use crate::state::{self, SkillState};
 use crate::store;
 
 /// A skill the global store provides.
@@ -37,10 +36,6 @@ impl Candidate {
 }
 
 /// The skill `name` in the global store.
-///
-/// Fails with the shared hint when no store is registered, with the scan
-/// warning when the registered path is unusable, and with a clear message when
-/// the store does not provide the skill.
 pub fn candidate(config: &Config, name: &str) -> Result<Candidate> {
     let report = store::scan(config.store_path()?)?;
     if !report.ready {
@@ -64,8 +59,8 @@ pub fn candidate(config: &Config, name: &str) -> Result<Candidate> {
 
 /// Resolve the install target for this command.
 ///
-/// `--dir` wins over `--agent`, which wins over `[defaults].target` in the
-/// manifest, which wins over the global `default_target`.
+/// `--dir` wins over `--agent`, which wins over the project's recorded target,
+/// which wins over the global `default_target`.
 pub fn resolve_target(
     config: &Config,
     project: &Project,
@@ -83,7 +78,7 @@ pub fn resolve_target(
             format!("agent '{agent}' is not defined in the global config ([agents] table)")
         });
     }
-    if let Some(target) = project.manifest.defaults.target.as_deref()
+    if let Some(target) = project.record.target.as_deref()
         && !target.trim().is_empty()
     {
         return Ok(target.to_owned());
@@ -187,12 +182,11 @@ pub fn plan_add(
         options.agent.as_deref(),
     )?;
     let root = project.root();
-    let now = state::now_epoch();
+    let now = registry::now_epoch();
     let mut plans = Vec::new();
     let mut seen: Vec<&str> = Vec::new();
 
     for name in names {
-        // Repeating a skill is a no-op, not an error.
         if seen.contains(&name.as_str()) {
             continue;
         }
@@ -201,12 +195,10 @@ pub fn plan_add(
         let candidate = candidate(config, name)?;
         let dest_dir = target_dir(root, &target).join(&candidate.skill.name);
         let dest_rel = skill::relative_path(&dest_dir, root);
-        // A tombstone is not an install: `add` starts over from the store.
         let existing = project
-            .state
+            .record
             .get(&candidate.skill.name, &target)
             .filter(|entry| !entry.detached);
-        let declared = project.manifest.install_for(&candidate.skill.name);
 
         let dest_exists = dest_dir.exists();
         let action = match existing {
@@ -230,9 +222,7 @@ pub fn plan_add(
             _ => Action::Install,
         };
 
-        let pinned = options.pin
-            || existing.is_some_and(|entry| entry.pinned)
-            || declared.is_some_and(|install| install.pin);
+        let pinned = options.pin || existing.is_some_and(|entry| entry.pinned);
         let installed_at = match (action, existing) {
             (Action::Resync, Some(entry)) => entry.installed_at,
             _ => now,
@@ -253,18 +243,17 @@ pub fn plan_add(
     Ok(plans)
 }
 
-/// Copy every planned skill, recording each one in the state and the manifest.
+/// Copy every planned skill and record each in the central project registry.
 pub fn apply_add(project: &mut Project, plans: &[AddPlan]) -> Result<()> {
     if plans.is_empty() {
         return Ok(());
     }
 
-    let mut document = project.document()?;
     for plan in plans {
         fsops::install_tree(&plan.source_dir, &plan.dest_dir)
             .with_context(|| format!("installing skill '{}'", plan.skill))?;
 
-        project.state.upsert(SkillState {
+        project.record.upsert(SkillState {
             name: plan.skill.clone(),
             source_rel: plan.source_rel.clone(),
             target: plan.target.clone(),
@@ -274,19 +263,8 @@ pub fn apply_add(project: &mut Project, plans: &[AddPlan]) -> Result<()> {
             installed_at: plan.installed_at,
             ..SkillState::default()
         });
-        // Saved per skill so an interrupted run still leaves a truthful state.
-        project.save_state()?;
-
-        manifest::doc_add_install(
-            &mut document,
-            &Install {
-                skill: Some(plan.skill.clone()),
-                pack: None,
-                pin: plan.pinned,
-            },
-        )?;
     }
-    project.write_document(&document)
+    project.save()
 }
 
 /// What `skm remove` does with one declared skill.
@@ -294,8 +272,6 @@ pub fn apply_add(project: &mut Project, plans: &[AddPlan]) -> Result<()> {
 pub enum RemoveAction {
     /// Deletes the copies and the entries.
     Remove,
-    /// Only drops the declaration: nothing was installed.
-    Unlink,
 }
 
 impl RemoveAction {
@@ -303,7 +279,6 @@ impl RemoveAction {
     pub fn verb(self) -> &'static str {
         match self {
             Self::Remove => "Removed",
-            Self::Unlink => "Un-declared",
         }
     }
 
@@ -311,7 +286,6 @@ impl RemoveAction {
     pub fn dry_verb(self) -> &'static str {
         match self {
             Self::Remove => "Would remove",
-            Self::Unlink => "Would un-declare",
         }
     }
 }
@@ -326,7 +300,7 @@ pub struct RemoveOptions {
 /// One installed copy on disk.
 #[derive(Debug, Clone)]
 pub struct InstalledCopy {
-    /// Target directory, as recorded in the state.
+    /// Target directory, as recorded in the registry.
     pub target: String,
     /// Directory of the copy.
     pub dest_dir: PathBuf,
@@ -352,8 +326,6 @@ pub fn plan_remove(
     names: &[String],
     options: &RemoveOptions,
 ) -> Result<Vec<RemovePlan>> {
-    // Removing is a project command, but a project without a registered store
-    // is a configuration error: fail early with the shared hint.
     config.store_path()?;
 
     let root = project.root();
@@ -366,56 +338,14 @@ pub fn plan_remove(
         }
         seen.push(name);
 
-        if project.manifest.install_for(name).is_none() {
-            if let Some(stale) = project.state.get_all(name).first() {
-                let dest = installed_dir(root, &stale.target, name);
-                bail!(
-                    "skill '{name}' is not declared in {MANIFEST_FILE} but skm installed it in {}; delete that directory by hand",
-                    skill::relative_path(&dest, root)
-                );
-            }
-            bail!("skill '{name}' is not declared in {MANIFEST_FILE}");
-        }
-
-        let entries: Vec<SkillState> = project
-            .state
-            .skills
-            .iter()
-            .filter(|entry| entry.name == *name)
-            .cloned()
-            .collect();
+        let entries = project.record.get_all(name);
 
         if entries.is_empty() {
-            // Declared but never installed: drop the declaration, and only
-            // delete a directory that the user confirms with --force.
-            let target = resolve_target(config, project, None, None)?;
-            let dest_dir = installed_dir(root, &target, name);
-            if !dest_dir.exists() {
-                plans.push(RemovePlan {
-                    skill: name.clone(),
-                    copies: Vec::new(),
-                    action: RemoveAction::Unlink,
-                });
-                continue;
-            }
-            let dest_rel = skill::relative_path(&dest_dir, root);
-            if !options.force {
-                bail!("{dest_rel} exists but is not managed by skm; pass --force to delete it");
-            }
-            plans.push(RemovePlan {
-                skill: name.clone(),
-                copies: vec![InstalledCopy {
-                    target,
-                    dest_dir,
-                    dest_rel,
-                }],
-                action: RemoveAction::Remove,
-            });
-            continue;
+            bail!("skill '{name}' is not registered in this project");
         }
 
         let mut copies = Vec::new();
-        for entry in &entries {
+        for entry in entries {
             let dest_dir = installed_dir(root, &entry.target, name);
             if dest_dir.is_dir() {
                 let current = hash::tree_hash(&dest_dir)?;
@@ -441,25 +371,18 @@ pub fn plan_remove(
     Ok(plans)
 }
 
-/// Delete every planned copy, then drop the entries from state and manifest.
+/// Delete every planned copy, then drop the entries from the central registry.
 pub fn apply_remove(project: &mut Project, plans: &[RemovePlan]) -> Result<()> {
     if plans.is_empty() {
         return Ok(());
     }
 
-    let mut document = project.document()?;
     for plan in plans {
         for copy in &plan.copies {
             fsops::remove_path(&copy.dest_dir)
                 .with_context(|| format!("removing {}", copy.dest_dir.display()))?;
-            project.state.remove(&plan.skill, &copy.target);
+            project.record.remove(&plan.skill, &copy.target);
         }
-        if !plan.copies.is_empty() {
-            // Only a real removal needs the state file; a declaration-only
-            // removal must not create `.skills-manager/`.
-            project.save_state()?;
-        }
-        manifest::doc_remove_install(&mut document, &plan.skill);
     }
-    project.write_document(&document)
+    project.save()
 }

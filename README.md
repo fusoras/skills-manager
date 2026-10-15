@@ -56,9 +56,10 @@ debounce_ms = 500
 | `skm store remove`                                                                                  | Unregister the store (the directory is never touched)               |
 | `skm store scan`                                                                                    | Full scan of the store: skills, packs and warnings                  |
 | `skm list`                                                                                          | Skills available in the store                                       |
-| `skm add <skill>... [--agent <name>] [--dir <path>] [--pin] [--force] [--dry-run]`                   | Copy skills into this project and declare them                      |
-| `skm remove <skill>... [--force] [--dry-run]`                                                       | Delete the copies and the declarations                              |
-| `skm status`                                                                                        | Health of every declared skill (read only)                          |
+| `skm projects`                                                                                      | List all managed projects on this machine                           |
+| `skm add <skill>... [--agent <name>] [--dir <path>] [--pin] [--force] [--dry-run]`                   | Copy skills into this project and record them                       |
+| `skm remove <skill>... [--force] [--dry-run]`                                                       | Delete the copies and unregister them                               |
+| `skm status`                                                                                        | Health of every recorded skill (read only)                          |
 | `skm sync [--force] [--dry-run]`                                                                    | Reconcile the project with the store                                |
 
 `skm store add <path>` registers one path: the same path (compared after `~`
@@ -88,24 +89,22 @@ and for frontmatter names that do not match their directory.
 
 ## Projects
 
-Commands that install skills work on the project found from the working
-directory: the nearest directory at or above it containing `skills.toml` or
-`.skills-manager/`, else the working directory itself. A project holds two
-files:
+`skm` uses a **zero-pollution architecture**: target projects contain **no metadata files
+and no configuration dotfiles**. There is no `skills.toml`, no `.skills-manager/`
+directory, and no need to touch `.gitignore`. The project holds only the actual
+skill directories installed into your agent target folders (e.g. `.agents/skills/<skill>/`).
+
+All project registrations, target paths, installed skill records, BLAKE3 hashes, pins,
+and detached tombstones are stored centrally in the user state directory:
+`<user state dir>/skm/projects.toml` (on Linux: `~/.local/state/skm/projects.toml`,
+or `$XDG_STATE_HOME/skm/projects.toml`).
 
 ```toml
-# skills.toml — committed, the declaration
-[defaults]
-target = ".agents/skills"          # optional; falls back to default_target
+# ~/.local/state/skm/projects.toml — central registry
+[projects."~/my-project"]
+targets = [".agents/skills"]
 
-[[install]]
-skill = "git-commit"
-pin = true                         # optional: later syncs leave it alone
-```
-
-```toml
-# .skills-manager/state.toml — generated, never commit it
-[[skill]]
+[[projects."~/my-project".skill]]
 name = "git-commit"
 source_rel = "git-commit"          # path of the skill inside the store
 target = ".agents/skills"          # where the copy lives, project relative
@@ -115,14 +114,25 @@ pinned = false
 installed_at = 1760536800          # epoch seconds
 ```
 
-The store is global: the manifest and the state never mention it. A copy that
-`skm sync` had to detach (see below) is recorded as a _tombstone_: the same entry
-plus `content_hash`, `detached_at` and `detached = true`. `skm` never touches a
-tombstoned directory again, and it never adopts it back, so a local fork is safe
-for good.
+The store is global: neither projects nor the central registry ever hardcode a store
+path into the skills. When a locally modified copy is detached by `skm sync` (see below),
+it is marked with `detached = true`, `content_hash`, and `detached_at`. `skm` never touches
+a tombstoned directory again, keeping local forks safe.
 
-**Managed projects should ignore `.skills-manager/`** (add it to their
-`.gitignore`); `skills.toml` is meant to be committed.
+### Discovering the project
+
+Commands that install or manage skills find the project root by inspecting the working
+directory and its ancestors:
+1. The nearest directory containing a `.git/` folder or recorded in `projects.toml`
+2. If neither is found, the current working directory itself
+
+Run `skm projects` to see all projects currently managed on your machine:
+
+```text
+$ skm projects
+~/work/frontend   (3 skills)
+~/work/backend    (5 skills)
+```
 
 ### Installing
 
@@ -133,11 +143,12 @@ permissions. The target is chosen in this order:
 
 1. `--dir <path>`
 2. `--agent <name>` (looked up in the `[agents]` table of the global config)
-3. `[defaults].target` of `skills.toml`
-4. `default_target` of the global config (`.agents/skills`)
+3. Target previously recorded for that skill in `projects.toml`
+4. Known targets recorded for the project in `projects.toml`
+5. `default_target` of the global config (`.agents/skills`)
 
-Each skill lands in `<target>/<skill name>`. `skm add` appends the `[[install]]`
-declaration and writes the state file.
+Each skill lands in `<target>/<skill name>`. `skm add` records the project and the
+skill in `~/.local/state/skm/projects.toml`.
 
 Guards, all reported as errors with the exact flag that gets past them:
 
@@ -146,26 +157,26 @@ Guards, all reported as errors with the exact flag that gets past them:
 - `skm remove` on a locally edited copy → `--force`
 
 `--dry-run` prints what would happen and writes nothing. Re-running `skm add`
-for an untouched skill is a no-op: it re-syncs the copy without touching the
-declaration or the state. `--pin` marks the copy as pinned in both files, and a
-later `skm add` without `--pin` never unpins it.
+for an untouched skill is a no-op: it re-syncs the copy without re-adding entries.
+`--pin` marks the copy as pinned in `projects.toml`, and a later `skm add`
+without `--pin` never unpins it.
 
 ### Checking
 
-`skm status` is read only and prints one row per declared skill plus one row per
-directory in a target that nothing declares. States, from the most to the least
-urgent:
+`skm status` is read only and prints one row per recorded skill in `projects.toml`
+plus one row per unmanaged directory found in known target folders. States, from
+the most to the least urgent:
 
 | State       | Meaning                                                               |
 | ----------- | --------------------------------------------------------------------- |
-| `missing`   | declared or recorded, but the directory is gone                       |
-| `detached`  | a local fork: the declaration was dropped and `skm` never touches it  |
+| `missing`   | recorded in central registry, but the directory is gone               |
+| `detached`  | a local fork: `skm` never touches it                                  |
 | `modified`  | the copy differs from `written_hash` (local edits)                    |
 | `behind`    | the store content differs from `source_hash` (an update is available) |
 | `pinned`    | in sync and pinned                                                    |
 | `ok`        | in sync                                                               |
 | `skipped`   | no store is registered, so the copy cannot be compared with one       |
-| `unmanaged` | a directory in a target that neither file knows                       |
+| `unmanaged` | a directory in a target that central registry does not know           |
 
 A detached fork is never compared with the store again, and without a registered
 store the comparison is `skipped (no store registered)` while the local verdicts
@@ -173,9 +184,9 @@ store the comparison is `skipped (no store registered)` while the local verdicts
 
 ### Syncing
 
-`skm sync` reconciles what the project declares with the store and prints one
-line per entry plus a counter summary. Only the copies `skm` itself wrote are
-ever refreshed: everything else is reported and left exactly as it is.
+`skm sync` reconciles what the project has recorded in `projects.toml` with the store
+and prints one line per entry plus a counter summary. Only the copies `skm` itself
+wrote are ever refreshed: everything else is reported and left exactly as it is.
 
 | Action      | Meaning                                                             |
 | ----------- | ------------------------------------------------------------------- |
@@ -183,12 +194,12 @@ ever refreshed: everything else is reported and left exactly as it is.
 | `updated`   | the store changed and the copy was refreshed from it                |
 | `installed` | the copy was missing and has been written                           |
 | `restored`  | a pinned copy was missing and has been written back                 |
-| `adopted`   | a copy that already matched the store is now recorded               |
+| `adopted`   | a copy that already matched the store is now recorded in registry   |
 | `replaced`  | `--force`: a locally modified copy was overwritten                  |
 | `pinned`    | the copy is pinned, so it is never updated                          |
-| `detached`  | a locally modified copy: the declaration was dropped, the fork kept |
+| `detached`  | a locally modified copy: detached tombstone recorded, fork kept     |
 | `skipped`   | the store cannot provide the skill                                  |
-| `unmanaged` | a directory in a target that nothing declares                       |
+| `unmanaged` | a directory in a target that nothing records                        |
 
 ```text
 $ skm sync
@@ -200,13 +211,11 @@ ok         git-commit -> .agents/skills/git-commit
 
 - **Pinned** copies are never updated; when their directory is gone they are
   restored from the store.
-- **Locally modified** copies are never overwritten. The `[[install]]`
-  declaration is dropped from `skills.toml` (comments and formatting survive)
-  and a tombstone goes into the state file: the files stay exactly as they are
-  and later syncs ignore them for good. `--force` overwrites them instead, and
-  keeps the declaration.
-- A copy with no recorded state (a fresh clone) is **adopted** when it matches
-  the store, and detached when it does not.
+- **Locally modified** copies are never overwritten. A detached tombstone is
+  recorded in `projects.toml`: the files stay exactly as they are and later syncs
+  ignore them for good. `--force` overwrites them instead and keeps them active.
+- A copy with no recorded state is **adopted** when it matches the store, and
+  detached when it does not.
 - A store that no longer holds the skill is reported as
   `skipped (store unavailable)`, and with no store registered everything is
   reported as `skipped (no store registered)`: nothing is touched either way.

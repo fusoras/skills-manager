@@ -1,4 +1,5 @@
 //! End-to-end tests of `skm sync`: reconciling a project with the global store.
+//! Projects remain 100% clean: no `skills.toml` and no `.skills-manager/`.
 
 mod common;
 
@@ -6,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::{
-    DEFAULT_CONFIG, Sandbox, lines, manifest_of, mtime, read, state_of, stdout_of, tree, value_of,
+    DEFAULT_CONFIG, Sandbox, assert_clean_project, lines, mtime, read, stdout_of, tree, value_of,
     write,
 };
 
@@ -46,8 +47,7 @@ fn dest(project: &Path) -> PathBuf {
 fn sync_reports_ok_and_writes_nothing() {
     let (sandbox, _store) = installed();
     let project = sandbox.project();
-    let manifest_before = read(&manifest_of(&project));
-    let state_before = read(&state_of(&project));
+    let registry_before = sandbox.registry_text();
     let mtime_before = mtime(&dest(&project).join("SKILL.md"));
 
     let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
@@ -59,21 +59,20 @@ fn sync_reports_ok_and_writes_nothing() {
             "1 entry: 1 ok".to_owned(),
         ])
     );
-    assert_eq!(read(&manifest_of(&project)), manifest_before);
-    assert_eq!(read(&state_of(&project)), state_before);
+    assert_clean_project(&project);
+    assert_eq!(sandbox.registry_text(), registry_before);
     assert_eq!(mtime(&dest(&project).join("SKILL.md")), mtime_before);
 
     // Sync is idempotent: running it again reports the same.
     let second = stdout_of(sandbox.skm_in(&project).arg("sync"));
     assert_eq!(second, output);
-    assert_eq!(read(&state_of(&project)), state_before);
+    assert_eq!(sandbox.registry_text(), registry_before);
 }
 
 #[test]
 fn sync_updates_a_copy_when_the_store_changes() {
     let (sandbox, store) = installed();
     let project = sandbox.project();
-    let manifest_before = read(&manifest_of(&project));
     write(&store.join("alpha").join("SKILL.md"), SKILL_V2);
 
     let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
@@ -85,16 +84,13 @@ fn sync_updates_a_copy_when_the_store_changes() {
             "1 entry: 1 updated".to_owned(),
         ])
     );
+    assert_clean_project(&project);
     assert_eq!(read(&dest(&project).join("SKILL.md")), SKILL_V2);
+
+    let registry = sandbox.registry_text();
     assert_eq!(
-        read(&manifest_of(&project)),
-        manifest_before,
-        "an update never touches the manifest"
-    );
-    let state = read(&state_of(&project));
-    assert_eq!(
-        value_of(&state, "written_hash"),
-        value_of(&state, "source_hash"),
+        value_of(&registry, "written_hash"),
+        value_of(&registry, "source_hash"),
         "the new store content is recorded as both hashes"
     );
 
@@ -123,6 +119,7 @@ fn sync_installs_a_missing_copy() {
             "1 entry: 1 installed".to_owned(),
         ])
     );
+    assert_clean_project(&project);
     assert_eq!(read(&dest(&project).join("SKILL.md")), SKILL_BODY);
 }
 
@@ -142,8 +139,9 @@ fn sync_restores_a_pinned_copy_that_was_deleted() {
             "1 entry: 1 restored".to_owned(),
         ])
     );
+    assert_clean_project(&project);
     assert_eq!(read(&dest(&project).join("SKILL.md")), SKILL_BODY);
-    assert_eq!(value_of(&read(&state_of(&project)), "pinned"), "true");
+    assert_eq!(value_of(&sandbox.registry_text(), "pinned"), "true");
 }
 
 #[test]
@@ -163,10 +161,11 @@ fn sync_keeps_a_pinned_copy_untouched_when_the_store_changes() {
             "1 entry: 1 pinned".to_owned(),
         ])
     );
+    assert_clean_project(&project);
     assert_eq!(tree(&dest(&project)), before);
     assert_eq!(
-        value_of(&read(&state_of(&project)), "source_hash"),
-        value_of(&read(&state_of(&project)), "written_hash"),
+        value_of(&sandbox.registry_text(), "source_hash"),
+        value_of(&sandbox.registry_text(), "written_hash"),
         "the recorded hashes still describe the installed copy"
     );
 }
@@ -193,20 +192,17 @@ fn sync_detaches_a_locally_modified_copy() {
             "1 entry: 1 detached".to_owned(),
         ])
     );
-    // The files are exactly the ones the user left behind.
+    assert_clean_project(&project);
     assert_eq!(tree(&dest), tree_before);
     assert_eq!(read(&dest.join("local.md")), "my fork\n");
     assert_eq!(read(&dest.join("SKILL.md")), SKILL_BODY);
-    // The declaration is gone; the manifest keeps everything else.
-    let manifest = read(&manifest_of(&project));
-    assert!(!manifest.contains("[[install]]"), "{manifest}");
-    // The tombstone records the fork.
-    let state = read(&state_of(&project));
-    assert_eq!(value_of(&state, "detached"), "true");
-    assert!(value_of(&state, "content_hash").starts_with("blake3:"));
+
+    let registry = sandbox.registry_text();
+    assert_eq!(value_of(&registry, "detached"), "true");
+    assert!(value_of(&registry, "content_hash").starts_with("blake3:"));
     assert!(
-        value_of(&state, "detached_at").parse::<i64>().unwrap() > 1_700_000_000,
-        "{state}"
+        value_of(&registry, "detached_at").parse::<i64>().unwrap() > 1_700_000_000,
+        "{registry}"
     );
 }
 
@@ -217,17 +213,16 @@ fn sync_ignores_the_tombstone_on_the_next_run() {
     let dest = dest(&project);
     write(&dest.join("local.md"), "my fork\n");
     stdout_of(sandbox.skm_in(&project).arg("sync"));
-    let state_before = read(&state_of(&project));
-    let manifest_before = read(&manifest_of(&project));
+    let registry_before = sandbox.registry_text();
 
     let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
 
     assert_eq!(
         output,
-        "Nothing to sync: no skills declared in skills.toml and nothing found in the target directories.\n"
+        "Nothing to sync: no skills registered in this project and nothing found in the target directories.\n"
     );
-    assert_eq!(read(&state_of(&project)), state_before);
-    assert_eq!(read(&manifest_of(&project)), manifest_before);
+    assert_clean_project(&project);
+    assert_eq!(sandbox.registry_text(), registry_before);
     assert_eq!(read(&dest.join("local.md")), "my fork\n");
 }
 
@@ -247,24 +242,21 @@ fn sync_replaces_a_modified_copy_with_force() {
             "1 entry: 1 replaced".to_owned(),
         ])
     );
+    assert_clean_project(&project);
     assert_eq!(read(&dest.join("SKILL.md")), SKILL_BODY);
-    assert!(
-        read(&manifest_of(&project)).contains("[[install]]"),
-        "a forced replacement keeps the declaration"
-    );
-    let state = read(&state_of(&project));
+    let registry = sandbox.registry_text();
     assert_eq!(
-        value_of(&state, "written_hash"),
-        value_of(&state, "source_hash")
+        value_of(&registry, "written_hash"),
+        value_of(&registry, "source_hash")
     );
 }
 
 #[test]
 fn sync_adopts_a_copy_that_matches_the_store() {
-    let (sandbox, _store) = installed();
+    let (sandbox, store) = installed();
     let project = sandbox.project();
-    // A fresh clone: the files are there, the local state is not.
-    fs::remove_dir_all(project.join(".skills-manager")).unwrap();
+    // A fresh project or clone: delete registry entry, files are on disk.
+    sandbox.write_registry("");
     let mtime_before = mtime(&dest(&project).join("SKILL.md"));
 
     let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
@@ -276,45 +268,14 @@ fn sync_adopts_a_copy_that_matches_the_store() {
             "1 entry: 1 adopted".to_owned(),
         ])
     );
+    assert_clean_project(&project);
     assert_eq!(mtime(&dest(&project).join("SKILL.md")), mtime_before);
-    let state = read(&state_of(&project));
+    let registry = sandbox.registry_text();
     assert_eq!(
-        value_of(&state, "written_hash"),
-        value_of(&state, "source_hash")
+        value_of(&registry, "written_hash"),
+        value_of(&registry, "source_hash")
     );
-}
-
-#[test]
-fn sync_detaches_a_copy_without_state_that_differs_from_the_store() {
-    let (sandbox, _store) = installed();
-    let project = sandbox.project();
-    let dest = dest(&project);
-    fs::remove_dir_all(project.join(".skills-manager")).unwrap();
-    write(&dest.join("local.md"), "my fork\n");
-
-    let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
-
-    assert_eq!(
-        output,
-        lines(&[
-            line(
-                "detached",
-                "alpha",
-                ".agents/skills/alpha",
-                Some("local modifications")
-            ),
-            "1 entry: 1 detached".to_owned(),
-        ])
-    );
-    assert!(!read(&manifest_of(&project)).contains("[[install]]"));
-    let state = read(&state_of(&project));
-    assert_eq!(value_of(&state, "detached"), "true");
-    // Nothing was ever written by skm: both hashes describe the fork.
-    assert_eq!(
-        value_of(&state, "content_hash"),
-        value_of(&state, "written_hash")
-    );
-    assert_eq!(read(&dest.join("local.md")), "my fork\n");
+    assert!(store.join("alpha").is_dir());
 }
 
 #[test]
@@ -339,6 +300,7 @@ fn sync_reports_unmanaged_directories_and_leaves_them_alone() {
             "2 entries: 1 ok, 1 unmanaged".to_owned(),
         ])
     );
+    assert_clean_project(&project);
     assert_eq!(read(&rogue.join("SKILL.md")), "hand made\n");
 }
 
@@ -362,6 +324,7 @@ fn sync_skips_a_skill_the_store_no_longer_has() {
             "1 entry: 1 skipped".to_owned(),
         ])
     );
+    assert_clean_project(&project);
     assert_eq!(read(&dest(&project).join("SKILL.md")), SKILL_BODY);
 }
 
@@ -400,6 +363,7 @@ fn sync_uses_the_target_recorded_in_the_state() {
         read(&project.join("custom/skills/alpha/SKILL.md")),
         SKILL_V2
     );
+    assert_clean_project(&project);
 }
 
 #[test]
@@ -410,8 +374,7 @@ fn sync_dry_run_plans_everything_and_writes_nothing() {
     stdout_of(sandbox.skm_in(&project).args(["add", "beta"]));
     write(&store.join("alpha").join("SKILL.md"), SKILL_V2);
     write(&project.join(".agents/skills/beta/local.md"), "my fork\n");
-    let manifest_before = read(&manifest_of(&project));
-    let state_before = read(&state_of(&project));
+    let registry_before = sandbox.registry_text();
     let tree_before = tree(&project);
     let mtime_before = mtime(&dest(&project).join("SKILL.md"));
 
@@ -431,8 +394,8 @@ fn sync_dry_run_plans_everything_and_writes_nothing() {
             "Dry run: nothing was written.".to_owned(),
         ])
     );
-    assert_eq!(read(&manifest_of(&project)), manifest_before);
-    assert_eq!(read(&state_of(&project)), state_before);
+    assert_clean_project(&project);
+    assert_eq!(sandbox.registry_text(), registry_before);
     assert_eq!(tree(&project), tree_before);
     assert_eq!(read(&dest(&project).join("SKILL.md")), SKILL_BODY);
     assert_eq!(mtime(&dest(&project).join("SKILL.md")), mtime_before);
@@ -452,44 +415,8 @@ fn sync_dry_run_plans_everything_and_writes_nothing() {
             "2 entries: 1 updated, 1 detached".to_owned(),
         ])
     );
+    assert_clean_project(&project);
     assert_eq!(read(&dest(&project).join("SKILL.md")), SKILL_V2);
-    let manifest = read(&manifest_of(&project));
-    assert!(manifest.contains("skill = \"alpha\""), "{manifest}");
-    assert!(!manifest.contains("skill = \"beta\""), "{manifest}");
-}
-
-#[test]
-fn sync_preserves_the_manifest_comments_when_it_detaches() {
-    let (sandbox, store) = installed();
-    let project = sandbox.project();
-    sandbox.skill(&store, "beta", None);
-    stdout_of(sandbox.skm_in(&project).args(["add", "beta"]));
-    write(
-        &manifest_of(&project),
-        "# team skills\n\n\
-         [[install]]\n# keep this one\nskill = \"alpha\"\n\n\
-         [[install]]\nskill = \"beta\"\n",
-    );
-    write(&project.join(".agents/skills/beta/local.md"), "my fork\n");
-
-    let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
-
-    assert!(output.contains("detached  beta"), "{output}");
-    let after = read(&manifest_of(&project));
-    assert!(after.starts_with("# team skills\n"), "{after}");
-    assert!(after.contains("# keep this one"), "{after}");
-    assert!(after.contains("skill = \"alpha\""), "{after}");
-    assert!(!after.contains("skill = \"beta\""), "{after}");
-
-    // The rewritten manifest still parses: a later sync reads it back.
-    let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
-    assert_eq!(
-        output,
-        lines(&[
-            line("ok", "alpha", ".agents/skills/alpha", None),
-            "1 entry: 1 ok".to_owned(),
-        ])
-    );
 }
 
 #[test]
@@ -501,7 +428,8 @@ fn sync_reports_an_empty_project() {
 
     assert_eq!(
         output,
-        "Nothing to sync: no skills declared in skills.toml and nothing found in the target directories.\n"
+        "Nothing to sync: no skills registered in this project and nothing found in the target directories.\n"
     );
+    assert_clean_project(&project);
     assert_eq!(tree(&project), Vec::<String>::new());
 }

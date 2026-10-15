@@ -13,7 +13,7 @@ use crate::cli::{Cli, Commands, ConfigCommand, StoreCommand};
 use crate::config::{self, Config};
 use crate::install::{self, Action, AddPlan, RemovePlan};
 use crate::output::{BOLD, Printer, Style};
-use crate::project::{self, Project};
+use crate::project::Project;
 use crate::status::{self, Health};
 use crate::store::{self, ScanReport};
 use crate::sync::{self, SyncAction, SyncPlan};
@@ -64,6 +64,7 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
         } => remove_skills(out, &skills, install::RemoveOptions { force }, dry_run),
         Commands::Status => status_cmd(out),
         Commands::Sync { force, dry_run } => sync_cmd(out, force, dry_run),
+        Commands::Projects => projects_cmd(out),
     }
 }
 
@@ -76,7 +77,6 @@ fn add_skills(
 ) -> Result<()> {
     let config = config::load()?;
     let mut project = Project::open()?;
-    project.manifest.reject_packs()?;
     let plans = install::plan_add(&config, &project, names, &options)?;
 
     if !dry_run {
@@ -121,7 +121,6 @@ fn remove_skills(
 ) -> Result<()> {
     let config = config::load()?;
     let mut project = Project::open()?;
-    project.manifest.reject_packs()?;
     let plans = install::plan_remove(&config, &project, names, &options)?;
 
     if !dry_run {
@@ -166,7 +165,6 @@ fn remove_line(style: Style, plan: &RemovePlan, dry_run: bool) -> String {
 fn sync_cmd(out: &mut Printer, force: bool, dry_run: bool) -> Result<()> {
     let config = config::load()?;
     let mut project = Project::open()?;
-    project.manifest.reject_packs()?;
     let plans = sync::plan_sync(&config, &project, force)?;
 
     if !dry_run {
@@ -174,10 +172,7 @@ fn sync_cmd(out: &mut Printer, force: bool, dry_run: bool) -> Result<()> {
     }
 
     if plans.is_empty() {
-        out.line(&format!(
-            "Nothing to sync: no skills declared in {} and nothing found in the target directories.",
-            project::MANIFEST_FILE
-        ))?;
+        out.line("Nothing to sync: no skills registered in this project and nothing found in the target directories.")?;
         return Ok(());
     }
 
@@ -238,13 +233,9 @@ fn sync_summary(plans: &[SyncPlan]) -> String {
 fn status_cmd(out: &mut Printer) -> Result<()> {
     let config = config::load()?;
     let project = Project::open()?;
-    project.manifest.reject_packs()?;
     let found = status::rows(&config, &project)?;
     if found.is_empty() {
-        out.line(&format!(
-            "Nothing to report: no skills declared in {} and nothing found in the target directories.",
-            project::MANIFEST_FILE
-        ))?;
+        out.line("Nothing to report: no skills registered in this project and nothing found in the target directories.")?;
         return Ok(());
     }
 
@@ -435,4 +426,31 @@ fn path_label(report: &ScanReport) -> String {
             report.resolved.display()
         )
     }
+}
+
+fn projects_cmd(out: &mut Printer) -> Result<()> {
+    let registry = crate::registry::Registry::load()?;
+    if registry.projects.is_empty() {
+        out.line("No projects registered.")?;
+        return Ok(());
+    }
+    let style = out.style();
+    let mut rows = Vec::new();
+    for (key, record) in &registry.projects {
+        let path = crate::registry::resolve_project_key(key);
+        let exists = path.is_dir();
+        let count = record.skills.len();
+        let status = if exists {
+            style.ok("active")
+        } else {
+            style.warn("missing on disk")
+        };
+        rows.push(vec![
+            key.clone(),
+            format!("{count} {}", if count == 1 { "skill" } else { "skills" }),
+            status,
+        ]);
+    }
+    out.table(&["PROJECT", "INSTALLED", "STATUS"], &rows)?;
+    Ok(())
 }

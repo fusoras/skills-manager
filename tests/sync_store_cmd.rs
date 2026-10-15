@@ -1,13 +1,11 @@
 //! End-to-end tests of `skm sync` against the single global store:
-//! where the skills come from, and which formats are refused.
+//! where the skills come from, and that target projects remain 100% clean.
 
 mod common;
 
 use std::path::{Path, PathBuf};
 
-use common::{
-    DEFAULT_CONFIG, Sandbox, failure_of, lines, manifest_of, read, state_of, stdout_of, tree, write,
-};
+use common::{DEFAULT_CONFIG, Sandbox, assert_clean_project, lines, read, stdout_of, tree};
 
 /// One line of the sync output: the keyword padded to the action column.
 fn line(keyword: &str, skill: &str, dest: &str, note: Option<&str>) -> String {
@@ -45,7 +43,7 @@ fn sync_without_a_store_skips_and_writes_nothing() {
     stdout_of(sandbox.skm_in(&project).args(["add", "alpha"]));
     stdout_of(sandbox.skm().args(["store", "remove"]));
     let tree_before = tree(&project);
-    let state_before = read(&state_of(&project));
+    let registry_before = sandbox.registry_text();
 
     let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
 
@@ -66,23 +64,8 @@ fn sync_without_a_store_skips_and_writes_nothing() {
         tree_before,
         "a skipped sync writes nothing at all"
     );
-    assert_eq!(read(&state_of(&project)), state_before);
-
-    // The same is reported for a declaration that was never installed.
-    write(&manifest_of(&project), "[[install]]\nskill = \"ghost\"\n");
-    let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
-    assert_eq!(
-        output,
-        lines(&[
-            line(
-                "skipped",
-                "ghost",
-                ".agents/skills/ghost",
-                Some("no store registered")
-            ),
-            "1 entry: 1 skipped".to_owned(),
-        ])
-    );
+    assert_eq!(sandbox.registry_text(), registry_before);
+    assert_clean_project(&project);
 }
 
 #[test]
@@ -91,7 +74,7 @@ fn sync_follows_the_store_that_is_registered_now() {
     let project = sandbox.project();
     let other = sandbox.path("other-store");
     sandbox.skill(&other, "alpha", Some("alpha"));
-    write(&other.join("alpha/v2.md"), "from the other store\n");
+    common::write(&other.join("alpha/v2.md"), "from the other store\n");
     sandbox.register_store(&other);
 
     let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
@@ -107,14 +90,19 @@ fn sync_follows_the_store_that_is_registered_now() {
         dest(&project).join("v2.md").is_file(),
         "the copy follows the store that is registered now"
     );
+    assert_clean_project(&project);
 }
 
 #[test]
-fn sync_uses_the_global_store_without_any_manifest_mapping() {
+fn sync_never_creates_metadata_files_in_project() {
     let (sandbox, _store) = installed();
     let project = sandbox.project();
-    // The manifest declares the skill and nothing else: the store is global.
-    write(&manifest_of(&project), "[[install]]\nskill = \"alpha\"\n");
+
+    common::write(
+        &project.join("Cargo.toml"),
+        "[package]\nname = \"my-project\"\n",
+    );
+    common::write(&project.join("README.md"), "# My Clean Project\n");
 
     let output = stdout_of(sandbox.skm_in(&project).arg("sync"));
 
@@ -125,43 +113,6 @@ fn sync_uses_the_global_store_without_any_manifest_mapping() {
             "1 entry: 1 ok".to_owned(),
         ])
     );
-}
-
-#[test]
-fn sync_rejects_the_old_manifest_format() {
-    let (sandbox, _store) = installed();
-    let project = sandbox.project();
-
-    // Every old shape is rejected on its own, not only in combination.
-    for old in [
-        "[stores]\npersonal = \"/srv/store\"\n",
-        "[[install]]\nskill = \"alpha\"\nstore = \"personal\"\n",
-        "[stores]\npersonal = \"/srv/store\"\n\n\
-         [[install]]\nskill = \"alpha\"\nstore = \"personal\"\n",
-    ] {
-        write(&manifest_of(&project), old);
-        let (stdout, stderr) = failure_of(sandbox.skm_in(&project).arg("sync"));
-        assert!(stdout.is_empty(), "{old}: {stdout}");
-        assert!(stderr.contains("old manifest format"), "{old}: {stderr}");
-        assert!(stderr.contains("store = \"...\""), "{old}: {stderr}");
-    }
-}
-
-#[test]
-fn sync_rejects_pack_entries() {
-    let sandbox = Sandbox::new();
-    let project = sandbox.project();
-    write(
-        &manifest_of(&project),
-        "[[install]]\npack = \"web-stack\"\n",
-    );
-
-    let (stdout, stderr) = failure_of(sandbox.skm_in(&project).arg("sync"));
-
-    assert!(stdout.is_empty(), "{stdout}");
-    assert!(
-        stderr
-            .contains("error: packs are not supported yet (install entry `pack = \"web-stack\"`)"),
-        "{stderr}"
-    );
+    assert_clean_project(&project);
+    assert_eq!(read(&project.join("README.md")), "# My Clean Project\n");
 }

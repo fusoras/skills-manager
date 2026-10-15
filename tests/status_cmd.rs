@@ -1,36 +1,25 @@
-//! End-to-end tests of `skm status`: the health of every declared skill.
+//! End-to-end tests of `skm status`: the health of every registered skill.
+//! Projects remain 100% clean: no `skills.toml` and no `.skills-manager/`.
 
 mod common;
 
 use std::fs;
 
-use common::{
-    Sandbox, failure_of, manifest_of, read, rows, state_of, stdout_of, table_cells, tree, write,
-};
-
-/// Manifest declaring every skill of the store.
-fn manifest_for(skills: &[&str]) -> String {
-    let mut text = String::new();
-    for skill in skills {
-        text.push_str(&format!("[[install]]\nskill = \"{skill}\"\n\n"));
-    }
-    text
-}
+use common::{Sandbox, assert_clean_project, rows, stdout_of, table_cells, tree, write};
 
 #[test]
 fn status_reports_every_state() {
     let sandbox = Sandbox::new();
     let store = sandbox.path("store");
-    let names = ["alpha", "beta", "delta", "epsilon", "gamma"];
+    let names = ["alpha", "beta", "delta", "gamma"];
     for name in names {
         sandbox.skill(&store, name, Some(name));
     }
     sandbox.register_store(&store);
     let project = sandbox.project();
-    write(&manifest_of(&project), &manifest_for(&names));
 
     // alpha stays untouched, beta gets a local edit, gamma a store update,
-    // delta is pinned and epsilon is never installed.
+    // delta is pinned.
     stdout_of(
         sandbox
             .skm_in(&project)
@@ -57,11 +46,11 @@ fn status_reports_every_state() {
             &["alpha", ".agents/skills", "ok"],
             &["beta", ".agents/skills", "modified"],
             &["delta", ".agents/skills", "pinned"],
-            &["epsilon", ".agents/skills", "missing"],
             &["gamma", ".agents/skills", "behind"],
             &["rogue", ".agents/skills", "unmanaged"],
         ])
     );
+    assert_clean_project(&project);
 }
 
 #[test]
@@ -74,7 +63,7 @@ fn status_without_a_store_reports_skipped() {
     stdout_of(sandbox.skm_in(&project).args(["add", "alpha"]));
     stdout_of(sandbox.skm().args(["store", "remove"]));
     let before_tree = tree(&project);
-    let before_state = read(&state_of(&project));
+    let before_registry = sandbox.registry_text();
 
     let output = stdout_of(sandbox.skm_in(&project).args(["status"]));
 
@@ -86,7 +75,8 @@ fn status_without_a_store_reports_skipped() {
         ])
     );
     assert_eq!(tree(&project), before_tree, "status must not write");
-    assert_eq!(read(&state_of(&project)), before_state);
+    assert_eq!(sandbox.registry_text(), before_registry);
+    assert_clean_project(&project);
 }
 
 #[test]
@@ -104,19 +94,18 @@ fn status_writes_nothing() {
     );
     write(&store.join("alpha/SKILL.md"), "---\nname: alpha\nv2\n---\n");
     let before_tree = tree(&project);
-    let before_manifest = read(&manifest_of(&project));
-    let before_state = read(&state_of(&project));
+    let before_registry = sandbox.registry_text();
 
     let output = stdout_of(sandbox.skm_in(&project).args(["status"]));
 
     assert!(output.contains("modified"), "{output}");
     assert_eq!(tree(&project), before_tree);
-    assert_eq!(read(&manifest_of(&project)), before_manifest);
     assert_eq!(
-        read(&state_of(&project)),
-        before_state,
+        sandbox.registry_text(),
+        before_registry,
         "status must not refresh the recorded hashes"
     );
+    assert_clean_project(&project);
 }
 
 #[test]
@@ -141,10 +130,11 @@ fn status_uses_the_target_recorded_in_the_state() {
             &["alpha", "custom/skills", "ok"],
         ])
     );
+    assert_clean_project(&project);
 }
 
 #[test]
-fn status_reports_an_empty_project_and_state_only_copies() {
+fn status_reports_an_empty_project() {
     let sandbox = Sandbox::new();
     let store = sandbox.path("store");
     sandbox.skill(&store, "alpha", Some("alpha"));
@@ -155,22 +145,10 @@ fn status_reports_an_empty_project_and_state_only_copies() {
 
     assert_eq!(
         output,
-        "Nothing to report: no skills declared in skills.toml and nothing found in the target directories.\n"
+        "Nothing to report: no skills registered in this project and nothing found in the target directories.\n"
     );
     assert_eq!(tree(&project), Vec::<String>::new());
-
-    // A copy installed by skm whose declaration was dropped by hand is still
-    // reported, so the state file is never a blind spot.
-    stdout_of(sandbox.skm_in(&project).args(["add", "alpha"]));
-    write(&manifest_of(&project), "");
-    let output = stdout_of(sandbox.skm_in(&project).args(["status"]));
-    assert_eq!(
-        table_cells(&output),
-        rows(&[
-            &["SKILL", "TARGET", "STATE"],
-            &["alpha", ".agents/skills", "ok"],
-        ])
-    );
+    assert_clean_project(&project);
 }
 
 #[test]
@@ -193,8 +171,8 @@ fn status_finds_the_project_root_from_a_subdirectory() {
     let output = stdout_of(sandbox.skm_in(&nested).args(["add", "beta"]));
     assert_eq!(output, "Installed beta -> .agents/skills/beta\n");
     assert!(project.join(".agents/skills/beta/SKILL.md").is_file());
-    assert!(!nested.join("skills.toml").exists());
-    assert!(manifest_of(&project).is_file());
+    assert_clean_project(&nested);
+    assert_clean_project(&project);
 }
 
 #[test]
@@ -220,28 +198,11 @@ fn status_reports_a_detached_fork() {
             &["alpha", ".agents/skills", "detached"],
         ])
     );
-}
-
-#[test]
-fn status_rejects_pack_entries() {
-    let sandbox = Sandbox::new();
-    let project = sandbox.project();
-    write(
-        &manifest_of(&project),
-        "[[install]]\npack = \"web-stack\"\n",
-    );
-
-    let (_, stderr) = failure_of(sandbox.skm_in(&project).args(["status"]));
-
-    assert!(
-        stderr.contains("packs are not supported yet (install entry `pack = \"web-stack\"`)"),
-        "{stderr}"
-    );
+    assert_clean_project(&project);
 }
 
 #[test]
 fn status_keeps_the_store_untouched() {
-    // The store is read only for `status`, exactly like for `add`.
     let sandbox = Sandbox::new();
     let store = sandbox.path("store");
     sandbox.skill(&store, "alpha", Some("alpha"));
@@ -253,4 +214,5 @@ fn status_keeps_the_store_untouched() {
     stdout_of(sandbox.skm_in(&project).args(["status"]));
 
     assert_eq!(tree(&store), before);
+    assert_clean_project(&project);
 }
