@@ -14,6 +14,7 @@ use anyhow::{Context, Result, bail};
 use crate::config::Config;
 use crate::fsops;
 use crate::hash;
+use crate::pack;
 use crate::project::Project;
 use crate::registry::{self, SkillState};
 use crate::skill::{self, Skill};
@@ -239,6 +240,8 @@ pub struct AddOptions {
     pub pin: bool,
     /// Overwrite local modifications.
     pub force: bool,
+    /// Whether `names` are pack names.
+    pub pack: bool,
 }
 
 /// One skill about to be installed.
@@ -262,15 +265,28 @@ pub struct AddPlan {
     pub pinned: bool,
     /// Timestamp to record.
     pub installed_at: i64,
+    /// Whether this skill is directly installed.
+    pub direct: bool,
+    /// Names of packs that include this skill.
+    pub pack_names: Vec<String>,
 }
 
-/// Plan the installation of every named skill, validating before any write.
+/// A planned batch of skills and pack associations to install.
+#[derive(Debug, Clone)]
+pub struct AddBatchPlan {
+    /// Individual skill installations.
+    pub plans: Vec<AddPlan>,
+    /// Packs to record in the project.
+    pub packs: Vec<String>,
+}
+
+/// Plan the installation of every named skill or pack, validating before any write.
 pub fn plan_add(
     config: &Config,
     project: &Project,
     names: &[String],
     options: &AddOptions,
-) -> Result<Vec<AddPlan>> {
+) -> Result<AddBatchPlan> {
     let targets = if options.targets.is_empty() {
         vec![config.agent_target("agent")]
     } else {
@@ -278,24 +294,63 @@ pub fn plan_add(
     };
     let root = project.root();
     let now = registry::now_epoch();
-    let mut plans = Vec::new();
-    let mut seen: Vec<&str> = Vec::new();
 
-    for name in names {
-        if seen.contains(&name.as_str()) {
-            continue;
+    struct Request {
+        skill: String,
+        pack: Option<String>,
+        direct: bool,
+    }
+
+    let mut requests: Vec<Request> = Vec::new();
+    let mut recorded_packs: Vec<String> = Vec::new();
+
+    if options.pack {
+        let store_root = Path::new(config.store_path()?);
+        for pack_name in names {
+            let pack_def = pack::load(store_root, pack_name)?;
+            if !recorded_packs.contains(&pack_def.name) {
+                recorded_packs.push(pack_def.name.clone());
+            }
+            for skill_name in pack_def.skills {
+                requests.push(Request {
+                    skill: skill_name,
+                    pack: Some(pack_def.name.clone()),
+                    direct: false,
+                });
+            }
         }
-        seen.push(name);
+    } else {
+        for name in names {
+            requests.push(Request {
+                skill: name.clone(),
+                pack: None,
+                direct: true,
+            });
+        }
+    }
 
-        let candidate = candidate(config, name)?;
+    let mut unique_skills: Vec<String> = Vec::new();
+    for req in &requests {
+        if !unique_skills.contains(&req.skill) {
+            unique_skills.push(req.skill.clone());
+        }
+    }
+
+    let mut plans = Vec::new();
+
+    for skill_name in unique_skills {
+        let candidate = candidate(config, &skill_name)?;
+        let skill_requests: Vec<_> = requests.iter().filter(|r| r.skill == skill_name).collect();
+        let is_direct_req = skill_requests.iter().any(|r| r.direct);
+        let req_packs: Vec<String> = skill_requests
+            .iter()
+            .filter_map(|r| r.pack.clone())
+            .collect();
 
         for target in &targets {
             let dest_dir = target_dir(root, target).join(&candidate.skill.name);
             let dest_rel = skill::relative_path(&dest_dir, root);
-            let existing = project
-                .record
-                .get(&candidate.skill.name, target)
-                .filter(|entry| !entry.detached);
+            let existing = project.record.get(&candidate.skill.name, target);
 
             let dest_exists = dest_dir.exists();
             let action = match existing {
@@ -303,7 +358,7 @@ pub fn plan_add(
                     let current = hash::tree_hash(&dest_dir)?;
                     if current != entry.written_hash && !options.force {
                         bail!(
-                            "skill '{name}' was modified in {dest_rel}; pass --force to overwrite it or run `skm remove {name}`"
+                            "skill '{skill_name}' was modified in {dest_rel}; pass --force to overwrite it or run `skm remove {skill_name}`"
                         );
                     }
                     if current != entry.written_hash {
@@ -325,6 +380,15 @@ pub fn plan_add(
                 _ => now,
             };
 
+            let direct = is_direct_req || existing.is_some_and(|e| e.direct);
+            let mut pack_names = existing.map(|e| e.packs.clone()).unwrap_or_default();
+            for p in req_packs.clone() {
+                if !pack_names.contains(&p) {
+                    pack_names.push(p);
+                }
+            }
+            pack_names.sort();
+
             plans.push(AddPlan {
                 skill: candidate.skill.name.clone(),
                 source_dir: candidate.source_dir(),
@@ -335,19 +399,21 @@ pub fn plan_add(
                 action,
                 pinned,
                 installed_at,
+                direct,
+                pack_names,
             });
         }
     }
-    Ok(plans)
+
+    Ok(AddBatchPlan {
+        plans,
+        packs: recorded_packs,
+    })
 }
 
 /// Copy every planned skill and record each in the central project registry.
-pub fn apply_add(project: &mut Project, plans: &[AddPlan]) -> Result<()> {
-    if plans.is_empty() {
-        return Ok(());
-    }
-
-    for plan in plans {
+pub fn apply_add(project: &mut Project, batch: &AddBatchPlan) -> Result<()> {
+    for plan in &batch.plans {
         fsops::install_tree(&plan.source_dir, &plan.dest_dir)
             .with_context(|| format!("installing skill '{}'", plan.skill))?;
 
@@ -359,31 +425,42 @@ pub fn apply_add(project: &mut Project, plans: &[AddPlan]) -> Result<()> {
             source_hash: hash::tree_hash(&plan.source_dir)?,
             pinned: plan.pinned,
             installed_at: plan.installed_at,
+            direct: plan.direct,
+            packs: plan.pack_names.clone(),
             ..SkillState::default()
         });
     }
+
+    for pack in &batch.packs {
+        project.record.add_pack(pack);
+    }
+
     project.save()
 }
 
 /// What `skm remove` does with one declared skill.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoveAction {
     /// Deletes the copies and the entries.
     Remove,
+    /// Retains the copies on disk because of remaining references.
+    Retain { reason: String },
 }
 
 impl RemoveAction {
     /// Verb of a real run.
-    pub fn verb(self) -> &'static str {
+    pub fn verb(&self) -> &'static str {
         match self {
             Self::Remove => "Removed",
+            Self::Retain { .. } => "Retained",
         }
     }
 
     /// Verb of a `--dry-run`.
-    pub fn dry_verb(self) -> &'static str {
+    pub fn dry_verb(&self) -> &'static str {
         match self {
             Self::Remove => "Would remove",
+            Self::Retain { .. } => "Would retain",
         }
     }
 }
@@ -395,6 +472,8 @@ pub struct RemoveOptions {
     pub targets: Vec<String>,
     /// Delete copies that were modified.
     pub force: bool,
+    /// Whether `names` are pack names.
+    pub pack: bool,
 }
 
 /// One installed copy on disk.
@@ -408,84 +487,268 @@ pub struct InstalledCopy {
     pub dest_rel: String,
 }
 
-/// One skill about to be uninstalled.
+/// One skill about to be uninstalled or retained.
 #[derive(Debug, Clone)]
 pub struct RemovePlan {
     /// Skill name.
     pub skill: String,
-    /// Copies to delete.
+    /// Copies affected.
     pub copies: Vec<InstalledCopy>,
     /// What will be done.
     pub action: RemoveAction,
+    /// If retaining, the new `direct` flag.
+    pub new_direct: Option<bool>,
+    /// If retaining, the remaining packs.
+    pub remaining_packs: Option<Vec<String>>,
 }
 
-/// Plan the removal of every named skill, validating before any write.
+/// A planned batch of removals and pack unlinks.
+#[derive(Debug, Clone)]
+pub struct RemoveBatchPlan {
+    /// Individual skill removals or retain actions.
+    pub plans: Vec<RemovePlan>,
+    /// Packs to remove from the project record.
+    pub packs: Vec<String>,
+}
+
+/// Plan the removal of every named skill or pack, validating before any write.
 pub fn plan_remove(
     config: &Config,
     project: &Project,
     names: &[String],
     options: &RemoveOptions,
-) -> Result<Vec<RemovePlan>> {
+) -> Result<RemoveBatchPlan> {
     config.store_path()?;
-
     let root = project.root();
     let mut plans = Vec::new();
-    let mut seen: Vec<&str> = Vec::new();
+    let mut recorded_packs = Vec::new();
 
-    for name in names {
-        if seen.contains(&name.as_str()) {
-            continue;
+    if options.pack {
+        let mut packs_to_remove = Vec::new();
+        for pack_name in names {
+            let has_pack = project.record.has_pack(pack_name);
+            let has_skills = project
+                .record
+                .skills
+                .iter()
+                .any(|s| s.packs.iter().any(|p| p == pack_name));
+            if !has_pack && !has_skills {
+                bail!("pack '{pack_name}' is not registered in this project");
+            }
+            if !packs_to_remove.contains(pack_name) {
+                packs_to_remove.push(pack_name.clone());
+            }
         }
-        seen.push(name);
+        recorded_packs = packs_to_remove.clone();
 
-        let mut entries = project.record.get_all(name);
-        if !options.targets.is_empty() {
-            entries.retain(|e| options.targets.contains(&e.target));
+        // Find all skills associated with ANY of packs_to_remove
+        let mut affected_skills: Vec<String> = Vec::new();
+        for skill_state in &project.record.skills {
+            if skill_state
+                .packs
+                .iter()
+                .any(|p| packs_to_remove.contains(p))
+                && !affected_skills.contains(&skill_state.name)
+            {
+                affected_skills.push(skill_state.name.clone());
+            }
         }
+        affected_skills.sort();
 
-        if entries.is_empty() {
-            bail!("skill '{name}' is not registered in this project");
+        for skill_name in affected_skills {
+            let mut entries = project.record.get_all(&skill_name);
+            if !options.targets.is_empty() {
+                entries.retain(|e| options.targets.contains(&e.target));
+            }
+            if entries.is_empty() {
+                continue;
+            }
+
+            let mut copies = Vec::new();
+            for entry in &entries {
+                let dest_dir = installed_dir(root, &entry.target, &skill_name);
+                copies.push(InstalledCopy {
+                    target: entry.target.clone(),
+                    dest_rel: skill::relative_path(&dest_dir, root),
+                    dest_dir,
+                });
+            }
+
+            let mut any_direct = false;
+            let mut remaining_packs: Vec<String> = Vec::new();
+            for entry in &entries {
+                if entry.direct {
+                    any_direct = true;
+                }
+                for p in &entry.packs {
+                    if !packs_to_remove.contains(p) && !remaining_packs.contains(p) {
+                        remaining_packs.push(p.clone());
+                    }
+                }
+            }
+            remaining_packs.sort();
+
+            if any_direct || !remaining_packs.is_empty() {
+                let reason = if any_direct {
+                    "still required by direct install".to_owned()
+                } else {
+                    format!("still required by pack '{}'", remaining_packs.join("', '"))
+                };
+                plans.push(RemovePlan {
+                    skill: skill_name,
+                    copies,
+                    action: RemoveAction::Retain { reason },
+                    new_direct: None,
+                    remaining_packs: Some(remaining_packs),
+                });
+            } else {
+                for copy in &copies {
+                    if copy.dest_dir.is_dir() {
+                        let entry = entries.iter().find(|e| e.target == copy.target).unwrap();
+                        let current = hash::tree_hash(&copy.dest_dir)?;
+                        if current != entry.written_hash && !options.force {
+                            bail!(
+                                "skill '{skill_name}' was modified in {}; pass --force to delete it anyway",
+                                copy.dest_rel
+                            );
+                        }
+                    }
+                }
+                plans.push(RemovePlan {
+                    skill: skill_name,
+                    copies,
+                    action: RemoveAction::Remove,
+                    new_direct: None,
+                    remaining_packs: None,
+                });
+            }
         }
+    } else {
+        let mut seen: Vec<&str> = Vec::new();
+        for name in names {
+            if seen.contains(&name.as_str()) {
+                continue;
+            }
+            seen.push(name);
 
-        let mut copies = Vec::new();
-        for entry in entries {
-            let dest_dir = installed_dir(root, &entry.target, name);
-            if dest_dir.is_dir() {
-                let current = hash::tree_hash(&dest_dir)?;
-                if current != entry.written_hash && !options.force {
+            let mut entries = project.record.get_all(name);
+            if !options.targets.is_empty() {
+                entries.retain(|e| options.targets.contains(&e.target));
+            }
+
+            if entries.is_empty() {
+                bail!("skill '{name}' is not registered in this project");
+            }
+
+            let mut copies = Vec::new();
+            for entry in &entries {
+                let dest_dir = installed_dir(root, &entry.target, name);
+                copies.push(InstalledCopy {
+                    target: entry.target.clone(),
+                    dest_rel: skill::relative_path(&dest_dir, root),
+                    dest_dir,
+                });
+            }
+
+            let mut all_packs: Vec<String> = Vec::new();
+            for entry in &entries {
+                for p in &entry.packs {
+                    if !all_packs.contains(p) {
+                        all_packs.push(p.clone());
+                    }
+                }
+            }
+
+            if !all_packs.is_empty() && !options.force {
+                let any_direct = entries.iter().any(|e| e.direct);
+                if any_direct {
+                    let reason = format!("still required by pack '{}'", all_packs.join("', '"));
+                    plans.push(RemovePlan {
+                        skill: name.clone(),
+                        copies,
+                        action: RemoveAction::Retain { reason },
+                        new_direct: Some(false),
+                        remaining_packs: None,
+                    });
+                    continue;
+                } else {
                     bail!(
-                        "skill '{name}' was modified in {}; pass --force to delete it anyway",
-                        skill::relative_path(&dest_dir, root)
+                        "skill '{name}' is part of pack '{}'; pass --force to delete it anyway or run `skm pack remove {}`",
+                        all_packs.join("', '"),
+                        all_packs[0]
                     );
                 }
             }
-            copies.push(InstalledCopy {
-                target: entry.target.clone(),
-                dest_rel: skill::relative_path(&dest_dir, root),
-                dest_dir,
+
+            for copy in &copies {
+                if copy.dest_dir.is_dir() {
+                    let entry = entries.iter().find(|e| e.target == copy.target).unwrap();
+                    let current = hash::tree_hash(&copy.dest_dir)?;
+                    if current != entry.written_hash && !options.force {
+                        bail!(
+                            "skill '{name}' was modified in {}; pass --force to delete it anyway",
+                            copy.dest_rel
+                        );
+                    }
+                }
+            }
+
+            plans.push(RemovePlan {
+                skill: name.clone(),
+                copies,
+                action: RemoveAction::Remove,
+                new_direct: None,
+                remaining_packs: None,
             });
         }
-        plans.push(RemovePlan {
-            skill: name.clone(),
-            copies,
-            action: RemoveAction::Remove,
-        });
     }
-    Ok(plans)
+
+    Ok(RemoveBatchPlan {
+        plans,
+        packs: recorded_packs,
+    })
 }
 
-/// Delete every planned copy, then drop the entries from the central registry.
-pub fn apply_remove(project: &mut Project, plans: &[RemovePlan]) -> Result<()> {
-    if plans.is_empty() {
+/// Delete every planned copy or unlink pack references in the central registry.
+pub fn apply_remove(project: &mut Project, batch: &RemoveBatchPlan) -> Result<()> {
+    if batch.plans.is_empty() && batch.packs.is_empty() {
         return Ok(());
     }
 
-    for plan in plans {
-        for copy in &plan.copies {
-            fsops::remove_path(&copy.dest_dir)
-                .with_context(|| format!("removing {}", copy.dest_dir.display()))?;
-            project.record.remove(&plan.skill, &copy.target);
+    for plan in &batch.plans {
+        match &plan.action {
+            RemoveAction::Remove => {
+                for copy in &plan.copies {
+                    fsops::remove_path(&copy.dest_dir)
+                        .with_context(|| format!("removing {}", copy.dest_dir.display()))?;
+                    project.record.remove(&plan.skill, &copy.target);
+                }
+            }
+            RemoveAction::Retain { .. } => {
+                for copy in &plan.copies {
+                    if let Some(entry) = project.record.get_mut(&plan.skill, &copy.target) {
+                        if let Some(direct) = plan.new_direct {
+                            entry.direct = direct;
+                        }
+                        if let Some(packs) = &plan.remaining_packs {
+                            entry.packs = packs.clone();
+                        }
+                    }
+                }
+            }
         }
     }
+
+    for pack in &batch.packs {
+        let still_in_use = project
+            .record
+            .skills
+            .iter()
+            .any(|s| s.packs.iter().any(|p| p == pack));
+        if !still_in_use {
+            project.record.remove_pack(pack);
+        }
+    }
+
     project.save()
 }

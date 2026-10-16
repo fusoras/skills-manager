@@ -7,16 +7,18 @@
 //! found from the working directory: `add`, `remove` and `sync` write
 //! `skills.toml` and `.skills-manager/state.toml`, `status` only reads.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
-use crate::cli::{Cli, Commands, ConfigCommand, StoreCommand};
+use crate::cli::{Cli, Commands, ConfigCommand, PackCommand, StoreCommand};
 use crate::config::{self, Config};
-use crate::install::{self, Action, AddPlan, RemovePlan};
+use crate::install::{self, Action, AddPlan, RemoveAction, RemovePlan};
 use crate::output::{BOLD, Printer, Style};
+use crate::pack;
 use crate::project::Project;
 use crate::status::{self, Health};
 use crate::store::{self, ScanReport};
 use crate::sync::{self, SyncAction, SyncPlan};
+use crate::targets;
 
 /// Footer of a `--dry-run`, so piped output can never be mistaken for a real run.
 const DRY_RUN_NOTE: &str = "Dry run: nothing was written.";
@@ -38,9 +40,16 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Config { action } => config_cmd(out, action),
         Commands::Store { action } => store_cmd(out, action),
-        Commands::List => list_skills(out),
+        Commands::List { packs } => {
+            if packs {
+                list_packs(out)
+            } else {
+                list_skills(out)
+            }
+        }
         Commands::Add {
             skills,
+            pack,
             agent,
             opencode,
             claude,
@@ -72,12 +81,14 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
                     targets,
                     pin,
                     force,
+                    pack,
                 },
                 dry_run,
             )
         }
         Commands::Remove {
             skills,
+            pack,
             agent,
             opencode,
             claude,
@@ -104,13 +115,107 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
             remove_skills(
                 out,
                 &skills,
-                install::RemoveOptions { targets, force },
+                install::RemoveOptions {
+                    targets,
+                    force,
+                    pack,
+                },
                 dry_run,
             )
         }
-        Commands::Status => status_cmd(out),
+        Commands::Status { packs } => {
+            if packs {
+                pack_status(out)
+            } else {
+                status_cmd(out)
+            }
+        }
+        Commands::Pack { action } => pack_cmd(out, action),
         Commands::Sync { force, dry_run } => sync_cmd(out, force, dry_run),
         Commands::Projects => projects_cmd(out),
+    }
+}
+
+fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
+    match action.unwrap_or(PackCommand::List) {
+        PackCommand::List => list_packs(out),
+        PackCommand::Show { name } => pack_show(out, &name),
+        PackCommand::Edit { name, add, remove } => pack_edit(out, &name, &add, &remove),
+        PackCommand::Status => pack_status(out),
+        PackCommand::Add {
+            packs,
+            agent,
+            opencode,
+            claude,
+            codex,
+            pi,
+            cursor,
+            dir,
+            pin,
+            force,
+            dry_run,
+        } => {
+            let config = config::load()?;
+            let targets = install::resolve_targets(
+                &config,
+                install::TargetFlags {
+                    agent,
+                    opencode,
+                    claude,
+                    codex,
+                    pi,
+                    cursor,
+                },
+                dir.as_deref(),
+            )?;
+            add_skills(
+                out,
+                &packs,
+                install::AddOptions {
+                    targets,
+                    pin,
+                    force,
+                    pack: true,
+                },
+                dry_run,
+            )
+        }
+        PackCommand::Remove {
+            packs,
+            agent,
+            opencode,
+            claude,
+            codex,
+            pi,
+            cursor,
+            dir,
+            force,
+            dry_run,
+        } => {
+            let config = config::load()?;
+            let targets = install::resolve_remove_targets(
+                &config,
+                install::TargetFlags {
+                    agent,
+                    opencode,
+                    claude,
+                    codex,
+                    pi,
+                    cursor,
+                },
+                dir.as_deref(),
+            )?;
+            remove_skills(
+                out,
+                &packs,
+                install::RemoveOptions {
+                    targets,
+                    force,
+                    pack: true,
+                },
+                dry_run,
+            )
+        }
     }
 }
 
@@ -123,17 +228,23 @@ fn add_skills(
 ) -> Result<()> {
     let config = config::load()?;
     let mut project = Project::open()?;
-    let plans = install::plan_add(&config, &project, names, &options)?;
+    let batch = install::plan_add(&config, &project, names, &options)?;
 
     if !dry_run {
-        install::apply_add(&mut project, &plans)?;
+        install::apply_add(&mut project, &batch)?;
     }
 
     let style = out.style();
-    for plan in &plans {
+    for plan in &batch.plans {
         out.line(&add_line(style, plan, dry_run))?;
     }
-    if dry_run && !plans.is_empty() {
+    if batch.plans.is_empty() && !batch.packs.is_empty() {
+        out.line(&format!(
+            "Pack '{}' has no skills to install.",
+            batch.packs.join("', '")
+        ))?;
+    }
+    if dry_run && !batch.plans.is_empty() {
         out.line(DRY_RUN_NOTE)?;
     }
     Ok(())
@@ -167,17 +278,23 @@ fn remove_skills(
 ) -> Result<()> {
     let config = config::load()?;
     let mut project = Project::open()?;
-    let plans = install::plan_remove(&config, &project, names, &options)?;
+    let batch = install::plan_remove(&config, &project, names, &options)?;
 
     if !dry_run {
-        install::apply_remove(&mut project, &plans)?;
+        install::apply_remove(&mut project, &batch)?;
     }
 
     let style = out.style();
-    for plan in &plans {
+    for plan in &batch.plans {
         out.line(&remove_line(style, plan, dry_run))?;
     }
-    if dry_run && !plans.is_empty() {
+    if batch.plans.is_empty() && !batch.packs.is_empty() {
+        out.line(&format!(
+            "Removed empty pack '{}'",
+            batch.packs.join("', '")
+        ))?;
+    }
+    if dry_run && !batch.plans.is_empty() {
         out.line(DRY_RUN_NOTE)?;
     }
     Ok(())
@@ -190,21 +307,37 @@ fn remove_line(style: Style, plan: &RemovePlan, dry_run: bool) -> String {
     } else {
         plan.action.verb()
     };
-    let detail = if plan.copies.is_empty() {
-        "was never installed".to_owned()
-    } else {
-        let copies: Vec<&str> = plan
-            .copies
-            .iter()
-            .map(|copy| copy.dest_rel.as_str())
-            .collect();
-        copies.join(", ")
+    let styled_verb = match &plan.action {
+        RemoveAction::Remove => style.warn(verb),
+        RemoveAction::Retain { .. } => style.ident(verb),
     };
-    format!(
-        "{} {} ({detail})",
-        style.warn(verb),
-        style.ident(&plan.skill)
-    )
+    let detail = match &plan.action {
+        RemoveAction::Remove => {
+            if plan.copies.is_empty() {
+                "was never installed".to_owned()
+            } else {
+                let copies: Vec<&str> = plan
+                    .copies
+                    .iter()
+                    .map(|copy| copy.dest_rel.as_str())
+                    .collect();
+                copies.join(", ")
+            }
+        }
+        RemoveAction::Retain { reason } => {
+            if plan.copies.is_empty() {
+                reason.clone()
+            } else {
+                let copies: Vec<&str> = plan
+                    .copies
+                    .iter()
+                    .map(|copy| copy.dest_rel.as_str())
+                    .collect();
+                format!("{}; {reason}", copies.join(", "))
+            }
+        }
+    };
+    format!("{styled_verb} {} ({detail})", style.ident(&plan.skill))
 }
 
 /// `skm sync`: reconcile every declared copy, then report the plan.
@@ -498,5 +631,171 @@ fn projects_cmd(out: &mut Printer) -> Result<()> {
         ]);
     }
     out.table(&["PROJECT", "INSTALLED", "STATUS"], &rows)?;
+    Ok(())
+}
+
+fn list_packs(out: &mut Printer) -> Result<()> {
+    let config = config::load()?;
+    let store_root = std::path::Path::new(config.store_path()?);
+    let packs = pack::list(store_root)?;
+    if packs.is_empty() {
+        out.line("No packs found in the store.")?;
+        return Ok(());
+    }
+
+    let style = out.style();
+    let rows: Vec<Vec<String>> = packs
+        .iter()
+        .map(|p| {
+            vec![
+                style.ident(&p.name),
+                p.skills.join(", "),
+                p.description.clone().unwrap_or_else(|| "-".to_owned()),
+            ]
+        })
+        .collect();
+    out.table(&["PACK", "SKILLS", "DESCRIPTION"], &rows)?;
+    Ok(())
+}
+
+fn pack_show(out: &mut Printer, name: &str) -> Result<()> {
+    let config = config::load()?;
+    let store_root = std::path::Path::new(config.store_path()?);
+    let pack = pack::load(store_root, name)?;
+    let style = out.style();
+
+    out.line(&style.paint(BOLD, "Pack"))?;
+    out.line(&format!("  {:<12} {}", "name", style.ident(&pack.name)))?;
+    out.line(&format!(
+        "  {:<12} {}",
+        "description",
+        pack.description.as_deref().unwrap_or("-")
+    ))?;
+    out.line(&format!("  {:<12} {}", "skills", pack.skills.len()))?;
+    for s in &pack.skills {
+        out.line(&format!("    - {}", style.ident(s)))?;
+    }
+    Ok(())
+}
+
+fn pack_status(out: &mut Printer) -> Result<()> {
+    let config = config::load()?;
+    let project = Project::open()?;
+    if project.record.packs.is_empty() {
+        out.line("No packs registered in this project.")?;
+        return Ok(());
+    }
+    let store_root = targets::store_root(&config);
+    let style = out.style();
+    let mut rows = Vec::new();
+    for pack_name in &project.record.packs {
+        let pack = store_root
+            .as_deref()
+            .and_then(|root| pack::load(root, pack_name).ok());
+        let count = pack.as_ref().map(|p| p.skills.len()).unwrap_or(0);
+        let skills_label = format!("{count} {}", if count == 1 { "skill" } else { "skills" });
+        rows.push(vec![
+            style.ident(pack_name),
+            skills_label,
+            style.ok("installed"),
+        ]);
+    }
+    out.table(&["PACK", "SKILLS", "STATE"], &rows)?;
+    Ok(())
+}
+
+fn pack_edit(out: &mut Printer, name: &str, add: &[String], remove: &[String]) -> Result<()> {
+    let config = config::load()?;
+    let store_root = std::path::Path::new(config.store_path()?);
+    let style = out.style();
+
+    if add.is_empty() && remove.is_empty() {
+        let file = pack::ensure_pack_template(store_root, name)?;
+        open_in_editor(&file)?;
+        match pack::load(store_root, name) {
+            Ok(p) => {
+                out.line(&format!(
+                    "Pack {} saved ({} skills).",
+                    style.ident(&p.name),
+                    p.skills.len()
+                ))?;
+            }
+            Err(e) => {
+                out.line(&format!(
+                    "{} Pack saved with warnings: {e:#}",
+                    style.warn("!")
+                ))?;
+            }
+        }
+        return Ok(());
+    }
+
+    // Validate that skills to add actually exist in store
+    for skill_name in add {
+        crate::install::candidate(&config, skill_name)?;
+    }
+
+    let mut pack = if !remove.is_empty() {
+        pack::remove_skills_from_pack(store_root, name, remove)?
+    } else {
+        pack::load(store_root, name).unwrap_or_else(|_| pack::Pack {
+            name: name.to_owned(),
+            description: None,
+            skills: Vec::new(),
+        })
+    };
+
+    if !add.is_empty() {
+        pack = pack::add_skills_to_pack(store_root, name, add)?;
+    }
+
+    let count = pack.skills.len();
+    let count_label = format!("{count} {}", if count == 1 { "skill" } else { "skills" });
+    let mut details = Vec::new();
+    if !add.is_empty() {
+        details.push(format!("added: {}", add.join(", ")));
+    }
+    if !remove.is_empty() {
+        details.push(format!("removed: {}", remove.join(", ")));
+    }
+
+    out.line(&format!(
+        "Updated pack {} ({count_label}; {})",
+        style.ident(&pack.name),
+        details.join("; ")
+    ))?;
+
+    Ok(())
+}
+
+fn open_in_editor(path: &std::path::Path) -> Result<()> {
+    let editor_var = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| {
+            if cfg!(windows) {
+                "notepad".to_owned()
+            } else {
+                "nano".to_owned()
+            }
+        });
+
+    let parts: Vec<&str> = editor_var.split_whitespace().collect();
+    if parts.is_empty() {
+        bail!("empty editor command");
+    }
+
+    let program = parts[0];
+    let mut cmd = std::process::Command::new(program);
+    for arg in &parts[1..] {
+        cmd.arg(arg);
+    }
+    cmd.arg(path);
+
+    let status = cmd
+        .status()
+        .with_context(|| format!("failed to launch editor '{program}'"))?;
+    if !status.success() {
+        bail!("editor exited with non-zero status");
+    }
     Ok(())
 }

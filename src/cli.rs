@@ -27,12 +27,19 @@ pub enum Commands {
         action: Option<StoreCommand>,
     },
     /// List skills available in the store
-    List,
+    List {
+        /// List packs instead of individual skills
+        #[arg(long)]
+        packs: bool,
+    },
     /// Install skills into this project
     Add {
         /// Skill names to install
         #[arg(required = true, value_name = "SKILL")]
         skills: Vec<String>,
+        /// Install a pack of skills instead of individual skills
+        #[arg(long, alias = "packs")]
+        pack: bool,
         /// Install into .agents/skills (default)
         #[arg(long, alias = "agents")]
         agent: bool,
@@ -69,6 +76,9 @@ pub enum Commands {
         /// Skill names to remove
         #[arg(required = true, value_name = "SKILL")]
         skills: Vec<String>,
+        /// Remove a pack of skills instead of individual skills
+        #[arg(long, alias = "packs")]
+        pack: bool,
         /// Remove from .agents/skills
         #[arg(long, alias = "agents")]
         agent: bool,
@@ -98,7 +108,17 @@ pub enum Commands {
         dry_run: bool,
     },
     /// Show the state of every skill declared in this project
-    Status,
+    Status {
+        /// Show status of packs instead of individual skills
+        #[arg(long)]
+        packs: bool,
+    },
+    /// Show or manage skill packs in the store
+    Pack {
+        /// Pack action to run (defaults to `list`)
+        #[command(subcommand)]
+        action: Option<PackCommand>,
+    },
     /// Reconcile the project with the global store
     Sync {
         /// Overwrite locally modified copies instead of detaching them
@@ -110,6 +130,101 @@ pub enum Commands {
     },
     /// List projects managed by skm on this machine
     Projects,
+}
+
+/// Actions of `skm pack`.
+#[derive(Debug, Subcommand)]
+pub enum PackCommand {
+    /// List packs available in the store (same as plain `skm pack`)
+    #[command(alias = "ls")]
+    List,
+    /// Show details of a pack in the store
+    Show {
+        /// Pack name to inspect
+        name: String,
+    },
+    /// Edit a pack in $EDITOR or modify its skills directly with --add / --remove
+    Edit {
+        /// Pack name to edit
+        name: String,
+        /// Add skill(s) to this pack
+        #[arg(long, num_args = 1.., value_name = "SKILL")]
+        add: Vec<String>,
+        /// Remove skill(s) from this pack
+        #[arg(long, num_args = 1.., value_name = "SKILL")]
+        remove: Vec<String>,
+    },
+    /// Show status of packs installed in this project
+    Status,
+    /// Install pack(s) into this project
+    Add {
+        /// Pack names to install
+        #[arg(required = true, value_name = "PACK")]
+        packs: Vec<String>,
+        /// Install into .agents/skills (default)
+        #[arg(long, alias = "agents")]
+        agent: bool,
+        /// Install into .opencode/skills
+        #[arg(long)]
+        opencode: bool,
+        /// Install into .claude/skills
+        #[arg(long)]
+        claude: bool,
+        /// Install into .codex/skills
+        #[arg(long)]
+        codex: bool,
+        /// Install into .pi/skills
+        #[arg(long)]
+        pi: bool,
+        /// Install into .cursor/skills
+        #[arg(long)]
+        cursor: bool,
+        /// Install into this custom directory
+        #[arg(long, value_name = "PATH")]
+        dir: Option<String>,
+        /// Pin the copies
+        #[arg(long)]
+        pin: bool,
+        /// Overwrite local modifications
+        #[arg(long)]
+        force: bool,
+        /// Show what would happen without writing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Remove pack(s) from this project
+    Remove {
+        /// Pack names to remove
+        #[arg(required = true, value_name = "PACK")]
+        packs: Vec<String>,
+        /// Remove from .agents/skills
+        #[arg(long, alias = "agents")]
+        agent: bool,
+        /// Remove from .opencode/skills
+        #[arg(long)]
+        opencode: bool,
+        /// Remove from .claude/skills
+        #[arg(long)]
+        claude: bool,
+        /// Remove from .codex/skills
+        #[arg(long)]
+        codex: bool,
+        /// Remove from .pi/skills
+        #[arg(long)]
+        pi: bool,
+        /// Remove from .cursor/skills
+        #[arg(long)]
+        cursor: bool,
+        /// Remove from this custom directory
+        #[arg(long, value_name = "PATH")]
+        dir: Option<String>,
+        /// Delete copies that were modified
+        #[arg(long)]
+        force: bool,
+        /// Show what would happen without writing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// Actions of `skm config`.
@@ -214,8 +329,15 @@ mod tests {
     }
 
     #[test]
-    fn list_takes_no_arguments() {
-        assert!(matches!(parse(&["list"]).command, Commands::List));
+    fn list_takes_optional_packs_flag() {
+        assert!(matches!(
+            parse(&["list"]).command,
+            Commands::List { packs: false }
+        ));
+        assert!(matches!(
+            parse(&["list", "--packs"]).command,
+            Commands::List { packs: true }
+        ));
         assert!(Cli::try_parse_from(["skm", "list", "--store", "main"]).is_err());
     }
 
@@ -239,6 +361,7 @@ mod tests {
     fn add_takes_skills_and_optional_flags() {
         let Commands::Add {
             skills,
+            pack,
             agent,
             opencode,
             claude,
@@ -254,12 +377,13 @@ mod tests {
             panic!("expected `add`");
         };
         assert_eq!(skills, ["alpha", "beta"]);
-        assert!(!agent && !opencode && !claude && !codex && !pi && !cursor);
+        assert!(!pack && !agent && !opencode && !claude && !codex && !pi && !cursor);
         assert!(dir.is_none());
         assert!(!pin && !force && !dry_run);
 
         let Commands::Add {
             skills,
+            pack,
             agent,
             opencode,
             claude,
@@ -273,6 +397,7 @@ mod tests {
         } = parse(&[
             "add",
             "alpha",
+            "--pack",
             "--agent",
             "--opencode",
             "--claude",
@@ -289,7 +414,7 @@ mod tests {
             panic!("expected `add`");
         };
         assert_eq!(skills, ["alpha"]);
-        assert!(agent && opencode && claude && codex && pi);
+        assert!(pack && agent && opencode && claude && codex && pi);
         assert_eq!(dir.as_deref(), Some("custom/skills"));
         assert!(pin && force && dry_run);
     }
@@ -309,6 +434,7 @@ mod tests {
     fn remove_takes_skills_and_flags() {
         let Commands::Remove {
             skills,
+            pack,
             force,
             dry_run,
             ..
@@ -317,20 +443,87 @@ mod tests {
             panic!("expected `remove`");
         };
         assert_eq!(skills, ["alpha"]);
-        assert!(!force && !dry_run);
+        assert!(!pack && !force && !dry_run);
 
-        let Commands::Remove { force, dry_run, .. } =
-            parse(&["remove", "alpha", "--force", "--dry-run"]).command
+        let Commands::Remove {
+            pack,
+            force,
+            dry_run,
+            ..
+        } = parse(&["remove", "alpha", "--pack", "--force", "--dry-run"]).command
         else {
             panic!("expected `remove`");
         };
-        assert!(force && dry_run);
+        assert!(pack && force && dry_run);
         assert!(Cli::try_parse_from(["skm", "remove", "alpha", "--store", "main"]).is_err());
     }
 
     #[test]
-    fn status_has_no_arguments() {
-        assert!(matches!(parse(&["status"]).command, Commands::Status));
+    fn status_takes_optional_packs_flag() {
+        assert!(matches!(
+            parse(&["status"]).command,
+            Commands::Status { packs: false }
+        ));
+        assert!(matches!(
+            parse(&["status", "--packs"]).command,
+            Commands::Status { packs: true }
+        ));
+    }
+
+    #[test]
+    fn pack_command_parses_subcommands() {
+        assert!(matches!(
+            parse(&["pack"]).command,
+            Commands::Pack { action: None }
+        ));
+        assert!(matches!(
+            parse(&["pack", "list"]).command,
+            Commands::Pack {
+                action: Some(PackCommand::List)
+            }
+        ));
+        assert!(matches!(
+            parse(&["pack", "status"]).command,
+            Commands::Pack {
+                action: Some(PackCommand::Status)
+            }
+        ));
+        let Commands::Pack {
+            action: Some(PackCommand::Show { name }),
+        } = parse(&["pack", "show", "frontend"]).command
+        else {
+            panic!("expected `pack show`");
+        };
+        assert_eq!(name, "frontend");
+
+        let Commands::Pack {
+            action: Some(PackCommand::Add { packs, agent, .. }),
+        } = parse(&["pack", "add", "frontend", "--agent"]).command
+        else {
+            panic!("expected `pack add`");
+        };
+        assert_eq!(packs, ["frontend"]);
+        assert!(agent);
+
+        let Commands::Pack {
+            action: Some(PackCommand::Edit { name, add, remove }),
+        } = parse(&["pack", "edit", "frontend", "--add", "tailwind", "seo"]).command
+        else {
+            panic!("expected `pack edit`");
+        };
+        assert_eq!(name, "frontend");
+        assert_eq!(add, ["tailwind", "seo"]);
+        assert!(remove.is_empty());
+
+        let Commands::Pack {
+            action: Some(PackCommand::Edit { name, add, remove }),
+        } = parse(&["pack", "edit", "frontend", "--remove", "seo"]).command
+        else {
+            panic!("expected `pack edit`");
+        };
+        assert_eq!(name, "frontend");
+        assert!(add.is_empty());
+        assert_eq!(remove, ["seo"]);
     }
 
     #[test]

@@ -40,6 +40,9 @@ pub struct ProjectRecord {
     /// Custom project-relative target directory for skills.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Installed packs in this project.
+    #[serde(default, rename = "packs", skip_serializing_if = "Vec::is_empty")]
+    pub packs: Vec<String>,
     /// Installed skills.
     #[serde(default, rename = "skill", skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<SkillState>,
@@ -72,6 +75,20 @@ pub struct SkillState {
     /// The copy is a local fork: sync leaves it alone for good.
     #[serde(default, skip_serializing_if = "is_false")]
     pub detached: bool,
+    /// Whether this skill was requested directly by name.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub direct: bool,
+    /// Names of packs that include this skill in this project.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub packs: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn is_false(value: &bool) -> bool {
@@ -86,12 +103,42 @@ impl ProjectRecord {
             .find(|entry| entry.name == name && entry.target == target)
     }
 
+    /// Mutable entry of a skill installed into `target`.
+    pub fn get_mut(&mut self, name: &str, target: &str) -> Option<&mut SkillState> {
+        self.skills
+            .iter_mut()
+            .find(|entry| entry.name == name && entry.target == target)
+    }
+
     /// Every entry of a skill, across all targets.
     pub fn get_all(&self, name: &str) -> Vec<&SkillState> {
         self.skills
             .iter()
             .filter(|entry| entry.name == name)
             .collect()
+    }
+
+    /// Returns `true` if `pack` is recorded.
+    pub fn has_pack(&self, name: &str) -> bool {
+        self.packs.iter().any(|p| p == name)
+    }
+
+    /// Add a pack name if not already recorded.
+    pub fn add_pack(&mut self, name: &str) {
+        if !self.has_pack(name) {
+            self.packs.push(name.to_owned());
+            self.packs.sort();
+        }
+    }
+
+    /// Remove a pack name.
+    pub fn remove_pack(&mut self, name: &str) -> bool {
+        if let Some(pos) = self.packs.iter().position(|p| p == name) {
+            self.packs.remove(pos);
+            true
+        } else {
+            false
+        }
     }
 
     /// Insert `entry`, replacing any existing entry with the same name and target.
@@ -129,7 +176,7 @@ impl ProjectRecord {
 
     /// Returns `true` if there are no installed skills and no custom target.
     pub fn is_empty(&self) -> bool {
-        self.skills.is_empty() && self.target.is_none()
+        self.skills.is_empty() && self.packs.is_empty() && self.target.is_none()
     }
 }
 

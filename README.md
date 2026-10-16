@@ -55,11 +55,17 @@ debounce_ms = 500
 | `skm store` / `skm store show`                                                                      | The registered store: path, state, layout and skill count           |
 | `skm store remove`                                                                                  | Unregister the store (the directory is never touched)               |
 | `skm store scan`                                                                                    | Full scan of the store: skills, packs and warnings                  |
-| `skm list`                                                                                          | Skills available in the store                                       |
+| `skm list [--packs]`                                                                                | Skills or packs available in the store                              |
+| `skm pack [list]`                                                                                   | List available packs in the store                                   |
+| `skm pack show <name>`                                                                              | Details of a pack (skills, description)                             |
+| `skm pack edit <name> [--add <skill>...] [--remove <skill>...]`                                     | Open pack in $EDITOR or add/remove skills directly via CLI          |
+| `skm pack status`                                                                                   | State of packs installed in this project                            |
+| `skm pack add <pack>... [agent flags] [--pin] [--force] [--dry-run]`                                | Install packs into this project                                     |
+| `skm pack remove <pack>... [agent flags] [--force] [--dry-run]`                                      | Remove packs with reference counting                                |
 | `skm projects`                                                                                      | List all managed projects on this machine                           |
-| `skm add <skill>... [--agent] [--opencode] [--claude] [--codex] [--pi] [--dir <path>] [--pin] [--force] [--dry-run]` | Copy skills into project agent targets and record them |
-| `skm remove <skill>... [--agent] [--opencode] [--claude] [--codex] [--pi] [--dir <path>] [--force] [--dry-run]`     | Delete copies and unregister them                      |
-| `skm status`                                                                                        | Health of every recorded skill (read only)                          |
+| `skm add <skill>... [--pack] [agent flags] [--pin] [--force] [--dry-run]`                           | Copy skills or packs into project agent targets                     |
+| `skm remove <skill>... [--pack] [agent flags] [--force] [--dry-run]`                                 | Delete copies or unlink packs with reference counting               |
+| `skm status [--packs]`                                                                              | Health of skills or packs (read only)                               |
 | `skm sync [--force] [--dry-run]`                                                                    | Reconcile the project with the store                                |
 
 `skm store add <path>` registers one path: the same path (compared after `~`
@@ -171,6 +177,76 @@ Guards, all reported as errors with the exact flag that gets past them:
 for an untouched skill is a no-op: it re-syncs the copy without re-adding entries.
 `--pin` marks the copy as pinned in `projects.toml`, and a later `skm add`
 without `--pin` never unpins it.
+
+### Packs
+
+Packs are named collections of skills that install together. They are defined in
+`<store>/packs/<name>.toml` in the store root:
+
+```toml
+# <store>/packs/frontend.toml
+name = "frontend"
+description = "Web development tools"
+skills = ["react", "tailwind", "seo"]
+```
+
+Packs live in the store only: they are **never copied into target projects** as files
+and maintain the zero-pollution guarantee.
+
+#### Creating a pack
+
+1. Create a `.toml` file inside the `packs/` directory of your store (e.g. `<store>/packs/web.toml`):
+   ```toml
+   # <store>/packs/web.toml
+   name = "web"                         # Optional: defaults to file stem ("web")
+   description = "Web development tools" # Optional
+   skills = [
+       "git-commit",
+       "react",
+   ]
+   ```
+2. Verify that `skm` detects it:
+   ```sh
+   skm pack list
+   skm pack show web
+   ```
+
+#### Adding or removing skills with `skm pack edit`
+
+You can modify pack skills directly from the command line without opening a text editor:
+
+```sh
+# Add one or more skills to a pack (creates the pack if it does not exist)
+skm pack edit web --add tailwind seo
+
+# Remove skills from a pack
+skm pack edit web --remove seo
+```
+
+Or open the pack file in your preferred text editor (`$EDITOR` / `$VISUAL`, fallback to `nano`):
+
+```sh
+skm pack edit web
+```
+
+To install newly added skills into projects that already use the pack:
+
+```sh
+skm add --pack web
+# or: skm pack add web
+```
+
+- **List & Show**: `skm pack` or `skm list --packs` displays all available packs;
+  `skm pack show <name>` inspects pack members and metadata.
+- **Install**: `skm add --pack frontend` or `skm pack add frontend` installs all
+  member skills into the chosen agent target directories (`--agent`, `--opencode`, etc.).
+- **Reference Counting**: Skills shared across multiple packs or installed directly are
+  safely reference-counted. Removing a pack (`skm remove --pack frontend` or
+  `skm pack remove frontend`) only deletes skills that are not required by another
+  pack or installed directly.
+- **Local Detach Safety**: If a skill installed via a pack is modified locally,
+  `skm sync` automatically detaches it as a local fork (`detached = true`) without
+  dropping its pack association.
 
 ### Checking
 

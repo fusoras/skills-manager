@@ -12,6 +12,7 @@ mod fsops;
 mod hash;
 mod install;
 mod output;
+mod pack;
 mod project;
 mod registry;
 mod skill;

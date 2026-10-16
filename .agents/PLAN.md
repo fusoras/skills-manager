@@ -5,34 +5,22 @@ what exists today; this file keeps what is still missing.
 
 ## Status
 
-**Implemented: M0 – M2** (193 tests green).
+**Implemented: M0 – M3** (203 tests green).
 - The store is **global and unique**: one directory per machine, registered by path.
 - **Zero-pollution architecture**: target projects contain NO `skills.toml`, NO `.skills-manager/` directory, and require NO `.gitignore` changes. All project metadata, targets, pins, tree hashes, and detached tombstones live centrally in `~/.local/state/skm/projects.toml`.
 - Added `skm projects` command to list all managed projects on the machine.
+- **Packs (M3)**: named collections in `<store>/packs/<name>.toml` installing together with reference counting and automatic detach of local modifications. Supported via `skm pack [list|show|edit|status|add|remove]` and flags `--pack` / `--packs`.
 
 | Phase | Scope | State |
 | --- | --- | --- |
 | M0 | Scaffold, global configuration, store commands (`config`, `store add/show/remove/scan`, `list`) | done |
 | M1 | `add` / `remove` / `status` / `projects`: real file copies, zero-pollution architecture, central registry (`~/.local/state/skm/projects.toml`), tree hashes | done |
 | M2 | `sync`: reconciliation with the store, auto-detach of locally modified copies, pins, adoption in central registry | done |
-| M3 | Packs: named collections of skills that install together | pending |
+| M3 | Packs: named collections of skills that install together | done |
 | M4 | Hybrid watcher: auto-sync before commands, `skm watch`, systemd / System V service | pending |
 | M5 | `doctor`, `--json`, CI `--check`, shell completions, docs polish | pending |
 
 ## Pending
-
-### M3 — packs
-
-* A pack is `<store>/packs/<name>.toml`: a named list of skills. Packs live in
-  the store only — they are **never copied into projects** and never exist as a
-  file in them; they just tell `skm` which skills to import together. They are
-  also the answer to "categories": with a single global store there are no named
-  stores to group skills by.
-* Support packs in `add`, `remove`, `status` and `sync`.
-* Reference counting: removing a pack must not delete skills still used by
-  another pack or recorded individually.
-* A pack member edited locally: detach that member (a state-level exclusion)
-  without dropping the pack association.
 
 ### M4 — watcher (hybrid)
 
