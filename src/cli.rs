@@ -31,6 +31,9 @@ pub enum Commands {
         /// List packs instead of individual skills
         #[arg(long)]
         packs: bool,
+        /// Show skill descriptions
+        #[arg(short, long, alias = "desc")]
+        description: bool,
     },
     /// Install skills into this project
     Add {
@@ -332,11 +335,38 @@ mod tests {
     fn list_takes_optional_packs_flag() {
         assert!(matches!(
             parse(&["list"]).command,
-            Commands::List { packs: false }
+            Commands::List {
+                packs: false,
+                description: false,
+            }
         ));
         assert!(matches!(
             parse(&["list", "--packs"]).command,
-            Commands::List { packs: true }
+            Commands::List {
+                packs: true,
+                description: false,
+            }
+        ));
+        assert!(matches!(
+            parse(&["list", "--desc"]).command,
+            Commands::List {
+                packs: false,
+                description: true,
+            }
+        ));
+        assert!(matches!(
+            parse(&["list", "--description"]).command,
+            Commands::List {
+                packs: false,
+                description: true,
+            }
+        ));
+        assert!(matches!(
+            parse(&["list", "-d"]).command,
+            Commands::List {
+                packs: false,
+                description: true,
+            }
         ));
         assert!(Cli::try_parse_from(["skm", "list", "--store", "main"]).is_err());
     }

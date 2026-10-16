@@ -41,7 +41,7 @@ For complete details on store normalization, default targets, agent overrides, a
 | `skm store` / `skm store show`                                            | The registered store: path, state, layout and skill count  |
 | `skm store remove`                                                        | Unregister the store (the directory is never touched)      |
 | `skm store scan`                                                          | Full scan of the store: skills, packs and warnings         |
-| `skm list [--packs]`                                                      | Skills or packs available in the store                     |
+| `skm list [--packs] [--desc]`                                              | Skills (with optional description) or packs in store        |
 | `skm pack [list]`                                                         | List available packs in the store                          |
 | `skm pack show <name>`                                                    | Details of a pack (skills, description)                    |
 | `skm pack edit <name> [--add <skill>...] [--remove <skill>...]`           | Open pack in $EDITOR or add/remove skills directly via CLI |
@@ -53,6 +53,8 @@ For complete details on store normalization, default targets, agent overrides, a
 | `skm remove <skill>... [--pack] [agent flags] [--force] [--dry-run]`      | Delete copies or unlink packs with reference counting      |
 | `skm status [--packs]`                                                    | Health of skills or packs (read only)                      |
 | `skm sync [--force] [--dry-run]`                                          | Reconcile the project with the store                       |
+
+`skm list` prints the skills available in the store. Passing `--desc` (or `-d` / `--description`) includes the skill description dimmed in gray, truncated dynamically with an ellipsis (`...`) to adapt to the terminal width without hiding the first word.
 
 `skm store add <path>` registers one path: the same path (compared after `~`
 expansion, so two spellings of one directory are one store) is a no-op and

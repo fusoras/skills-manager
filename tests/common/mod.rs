@@ -96,6 +96,21 @@ impl Sandbox {
         dir
     }
 
+    /// Create `<store>/<directory>/SKILL.md` with explicit name and description.
+    pub fn skill_with_desc(
+        &self,
+        store: &Path,
+        directory: &str,
+        name: &str,
+        desc: &str,
+    ) -> PathBuf {
+        let dir = store.join(directory);
+        fs::create_dir_all(&dir).expect("create skill dir");
+        let body = format!("---\nname: {name}\ndescription: {desc}\n---\n\n# Body\n");
+        fs::write(dir.join("SKILL.md"), body).expect("write SKILL.md");
+        dir
+    }
+
     /// Flat store: two skills, a broken dir, hidden entries, packs and a loose file.
     pub fn flat_store(&self) -> PathBuf {
         let root = self.path("flat-store");

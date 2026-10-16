@@ -17,6 +17,8 @@ pub const GREEN: &str = "\x1b[32m";
 pub const YELLOW: &str = "\x1b[33m";
 /// ANSI: cyan (identifiers).
 pub const CYAN: &str = "\x1b[36m";
+/// ANSI: bright black / gray (dimmed descriptions).
+pub const GRAY: &str = "\x1b[90m";
 
 /// Decides whether ANSI codes are emitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +69,32 @@ impl Style {
     pub fn ident(self, text: &str) -> String {
         self.paint(CYAN, text)
     }
+
+    /// Gray dimmed marker for descriptions.
+    pub fn gray(self, text: &str) -> String {
+        self.paint(GRAY, text)
+    }
+}
+
+/// Query the current terminal width in columns.
+///
+/// Priority:
+/// 1. `COLUMNS` environment variable (if set and valid positive integer).
+/// 2. `terminal_size::terminal_size()`.
+pub fn terminal_width() -> Option<usize> {
+    let env_cols = std::env::var("COLUMNS").ok();
+    terminal_width_from(env_cols.as_deref())
+}
+
+/// Helper that checks `COLUMNS` first, falling back to `terminal_size`.
+pub fn terminal_width_from(env_columns: Option<&str>) -> Option<usize> {
+    if let Some(val) = env_columns
+        && let Ok(cols) = val.trim().parse::<usize>()
+        && cols > 0
+    {
+        return Some(cols);
+    }
+    terminal_size::terminal_size().map(|(terminal_size::Width(w), _)| w as usize)
 }
 
 /// Writer wrapper that renders styled lines and tables.
@@ -236,6 +264,7 @@ mod tests {
     fn style_plain_never_paints() {
         assert_eq!(Style::plain().ok("OK"), "OK");
         assert_eq!(Style::plain().fail("BROKEN"), "BROKEN");
+        assert_eq!(Style::plain().gray("dimmed"), "dimmed");
     }
 
     #[test]
@@ -245,7 +274,22 @@ mod tests {
         assert_eq!(style.warn("w"), "\x1b[33mw\x1b[0m");
         assert_eq!(style.fail("e"), "\x1b[31me\x1b[0m");
         assert_eq!(style.ident("id"), "\x1b[36mid\x1b[0m");
+        assert_eq!(style.gray("dim"), "\x1b[90mdim\x1b[0m");
         assert_eq!(style.paint(BOLD, "b"), "\x1b[1mb\x1b[0m");
+    }
+
+    #[test]
+    fn terminal_width_reads_columns_env() {
+        assert_eq!(terminal_width_from(Some("100")), Some(100));
+        assert_eq!(terminal_width_from(Some("42")), Some(42));
+        assert_eq!(
+            terminal_width_from(Some("0")),
+            terminal_size::terminal_size().map(|(w, _)| w.0 as usize)
+        );
+        assert_eq!(
+            terminal_width_from(Some("invalid")),
+            terminal_size::terminal_size().map(|(w, _)| w.0 as usize)
+        );
     }
 
     /// Writer that keeps everything written to it, shareable with the test.

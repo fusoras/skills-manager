@@ -12,9 +12,10 @@ use anyhow::{Context, Result, bail};
 use crate::cli::{Cli, Commands, ConfigCommand, PackCommand, StoreCommand};
 use crate::config::{self, Config};
 use crate::install::{self, Action, AddPlan, RemoveAction, RemovePlan};
-use crate::output::{BOLD, Printer, Style};
+use crate::output::{self, BOLD, Printer, Style};
 use crate::pack;
 use crate::project::Project;
+use crate::skill;
 use crate::status::{self, Health};
 use crate::store::{self, ScanReport};
 use crate::sync::{self, SyncAction, SyncPlan};
@@ -40,11 +41,11 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Config { action } => config_cmd(out, action),
         Commands::Store { action } => store_cmd(out, action),
-        Commands::List { packs } => {
+        Commands::List { packs, description } => {
             if packs {
                 list_packs(out)
             } else {
-                list_skills(out)
+                list_skills(out, description)
             }
         }
         Commands::Add {
@@ -556,7 +557,7 @@ fn render_report(out: &mut Printer, report: &ScanReport) -> Result<()> {
     Ok(())
 }
 
-fn list_skills(out: &mut Printer) -> Result<()> {
+fn list_skills(out: &mut Printer, show_desc: bool) -> Result<()> {
     let config = config::load()?;
     let report = store::scan(config.store_path()?)?;
     if !report.ready {
@@ -570,12 +571,39 @@ fn list_skills(out: &mut Printer) -> Result<()> {
         return Ok(());
     }
 
-    let rows: Vec<Vec<String>> = report
-        .skills
-        .iter()
-        .map(|skill| vec![style.ident(&skill.name), skill.rel_path.clone()])
-        .collect();
-    out.table(&["SKILL", "PATH"], &rows)?;
+    if show_desc {
+        let max_skill_len = report
+            .skills
+            .iter()
+            .map(|s| s.name.len())
+            .max()
+            .unwrap_or(0)
+            .max("SKILL".len());
+        let prefix_width = max_skill_len + 2;
+        let term_width = output::terminal_width().unwrap_or(80);
+        let available_desc_width = term_width.saturating_sub(prefix_width).min(60);
+
+        let rows: Vec<Vec<String>> = report
+            .skills
+            .iter()
+            .map(|skill| {
+                let desc = skill
+                    .description
+                    .as_deref()
+                    .map(|d| skill::truncate_description(d, available_desc_width))
+                    .unwrap_or_else(|| "-".to_owned());
+                vec![style.ident(&skill.name), style.gray(&desc)]
+            })
+            .collect();
+        out.table(&["SKILL", "DESCRIPTION"], &rows)?;
+    } else {
+        let rows: Vec<Vec<String>> = report
+            .skills
+            .iter()
+            .map(|skill| vec![style.ident(&skill.name)])
+            .collect();
+        out.table(&["SKILL"], &rows)?;
+    }
     Ok(())
 }
 
