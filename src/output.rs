@@ -108,6 +108,27 @@ pub fn terminal_width_from(env_columns: Option<&str>) -> Option<usize> {
     terminal_size::terminal_size().map(|(terminal_size::Width(w), _)| w as usize)
 }
 
+/// Query the current terminal height in lines.
+///
+/// Priority:
+/// 1. `LINES` environment variable (if set and valid positive integer).
+/// 2. `terminal_size::terminal_size()`.
+pub fn terminal_height() -> Option<usize> {
+    let env_lines = std::env::var("LINES").ok();
+    terminal_height_from(env_lines.as_deref())
+}
+
+/// Helper that checks `LINES` first, falling back to `terminal_size`.
+pub fn terminal_height_from(env_lines: Option<&str>) -> Option<usize> {
+    if let Some(val) = env_lines
+        && let Ok(lines) = val.trim().parse::<usize>()
+        && lines > 0
+    {
+        return Some(lines);
+    }
+    terminal_size::terminal_size().map(|(_, terminal_size::Height(h))| h as usize)
+}
+
 /// Writer wrapper that renders styled lines and tables.
 pub struct Printer {
     out: Box<dyn Write>,
@@ -300,6 +321,20 @@ mod tests {
         assert_eq!(
             terminal_width_from(Some("invalid")),
             terminal_size::terminal_size().map(|(w, _)| w.0 as usize)
+        );
+    }
+
+    #[test]
+    fn terminal_height_reads_lines_env() {
+        assert_eq!(terminal_height_from(Some("40")), Some(40));
+        assert_eq!(terminal_height_from(Some("15")), Some(15));
+        assert_eq!(
+            terminal_height_from(Some("0")),
+            terminal_size::terminal_size().map(|(_, h)| h.0 as usize)
+        );
+        assert_eq!(
+            terminal_height_from(Some("invalid")),
+            terminal_size::terminal_size().map(|(_, h)| h.0 as usize)
         );
     }
 
