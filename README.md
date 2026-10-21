@@ -90,14 +90,30 @@ directories, and copies the whole skill directory as real files through a tempor
 directory next to the destination plus an atomic `rename`, preserving
 permissions.
 
-When run without arguments (e.g. `skm add`) in an interactive terminal or with the `-i` / `--interactive` flag, `skm` launches a lightweight terminal multi-select picker allowing you to toggle skills with `<space>` and confirm with `<enter>`:
+When run without arguments (e.g. `skm add`) in an interactive terminal or with the `-i` / `--interactive` flag, `skm` launches a lightweight terminal multi-select picker:
 
 ```text
 ? Select skills to install:
 [x] git-commit
 [ ] rust-best-practices
 [x] strict-testing
-> Press <space> to toggle, <enter> to confirm
+
+[Press <space> to toggle, <a> to toggle all, <enter> to confirm]
+```
+
+If no agent flags were specified on the command line, `skm` then presents a multi-select prompt for the target agent(s):
+
+```text
+? Select target agent(s):
+[x] opencode         (.opencode/skills)
+[ ] antigravity      (.gemini/skills)
+[ ] claude           (.claude/skills)
+[ ] pi               (.pi/skills)
+[ ] cursor           (.cursor/skills)
+[ ] codex            (.codex/skills)
+[ ] agent            (.agents/skills)
+
+[Press <space> to toggle, <a> to toggle all, <enter> to confirm]
 ```
 
 (The same interactive selection is available for packs with `skm pack add -i` or `skm add --pack -i`).

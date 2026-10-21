@@ -69,6 +69,67 @@ pub fn select_skills(config: &Config) -> Result<Vec<String>> {
     }
 }
 
+/// An agent choice item displayed in the interactive target prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentChoice {
+    pub name: &'static str,
+    pub target: String,
+}
+
+impl std::fmt::Display for AgentChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:<16} ({})", self.name, self.target)
+    }
+}
+
+/// Prompt the user to interactively select target agents.
+pub fn select_agents(config: &Config, global: bool) -> Result<Vec<String>> {
+    let choices = agent_choices(config, global);
+    let count = choices.len();
+    let prompt_msg = if global {
+        "Select global target agent(s):"
+    } else {
+        "Select target agent(s):"
+    };
+
+    let prompt = MultiSelect::new(prompt_msg, choices)
+        .with_render_config(render_config())
+        .with_page_size(page_size_for(count))
+        .with_help_message(HELP_MESSAGE);
+
+    match prompt.prompt() {
+        Ok(selected) => Ok(selected.into_iter().map(|c| c.target).collect()),
+        Err(
+            inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted,
+        ) => Ok(Vec::new()),
+        Err(err) => Err(anyhow::anyhow!("interactive prompt error: {err}")),
+    }
+}
+
+fn agent_choices(config: &Config, global: bool) -> Vec<AgentChoice> {
+    let agents = [
+        "opencode",
+        "antigravity",
+        "claude",
+        "pi",
+        "cursor",
+        "codex",
+        "agent",
+    ];
+
+    agents
+        .into_iter()
+        .map(|name| {
+            let target = if global {
+                config.global_agent_target(name)
+            } else {
+                config.agent_target(name)
+            };
+            AgentChoice { name, target }
+        })
+        .collect()
+}
+
 /// Prompt the user to interactively select packs from the store.
 pub fn select_packs(config: &Config) -> Result<Vec<String>> {
     let store_root = std::path::Path::new(config.store_path()?);
@@ -118,5 +179,42 @@ mod tests {
     fn page_size_falls_back_when_terminal_height_unknown() {
         assert_eq!(page_size_from(12, None), 12);
         assert_eq!(page_size_from(0, None), 1);
+    }
+
+    #[test]
+    fn agent_choice_formats_cleanly() {
+        let choice = AgentChoice {
+            name: "opencode",
+            target: ".opencode/skills".to_owned(),
+        };
+        assert_eq!(format!("{choice}"), "opencode         (.opencode/skills)");
+    }
+
+    #[test]
+    fn agent_choices_maps_local_and_global_targets() {
+        let config = Config::default();
+        let local_choices = agent_choices(&config, false);
+        assert!(
+            local_choices
+                .iter()
+                .any(|c| c.name == "opencode" && c.target == ".opencode/skills")
+        );
+        assert!(
+            local_choices
+                .iter()
+                .any(|c| c.name == "antigravity" && c.target == ".gemini/skills")
+        );
+
+        let global_choices = agent_choices(&config, true);
+        assert!(
+            global_choices
+                .iter()
+                .any(|c| c.name == "opencode" && c.target == "~/.config/opencode/skills")
+        );
+        assert!(
+            global_choices
+                .iter()
+                .any(|c| c.name == "antigravity" && c.target == "~/.gemini/skills")
+        );
     }
 }

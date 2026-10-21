@@ -68,6 +68,8 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
             dry_run,
         } => {
             let config = config::load()?;
+            let is_interactive =
+                interactive || (skills.is_empty() && std::io::stdin().is_terminal());
             let skills = if skills.is_empty() {
                 if !interactive && !std::io::stdin().is_terminal() {
                     bail!(
@@ -88,20 +90,51 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
                 skills
             };
 
-            let targets = install::resolve_targets(
-                &config,
-                install::TargetFlags {
-                    agent,
-                    antigravity,
-                    opencode,
-                    claude,
-                    codex,
-                    pi,
-                    cursor,
-                    global,
-                },
-                dir.as_deref(),
-            )?;
+            let has_agent_flags = agent
+                || antigravity
+                || opencode
+                || claude
+                || codex
+                || pi
+                || cursor
+                || dir.is_some();
+
+            let targets = if is_interactive && !has_agent_flags {
+                let chosen = crate::interactive::select_agents(&config, global)?;
+                if chosen.is_empty() {
+                    install::resolve_targets(
+                        &config,
+                        install::TargetFlags {
+                            agent,
+                            antigravity,
+                            opencode,
+                            claude,
+                            codex,
+                            pi,
+                            cursor,
+                            global,
+                        },
+                        dir.as_deref(),
+                    )?
+                } else {
+                    chosen
+                }
+            } else {
+                install::resolve_targets(
+                    &config,
+                    install::TargetFlags {
+                        agent,
+                        antigravity,
+                        opencode,
+                        claude,
+                        codex,
+                        pi,
+                        cursor,
+                        global,
+                    },
+                    dir.as_deref(),
+                )?
+            };
             add_skills(
                 out,
                 &skills,
@@ -201,6 +234,8 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
             dry_run,
         } => {
             let config = config::load()?;
+            let is_interactive =
+                interactive || (packs.is_empty() && std::io::stdin().is_terminal());
             let packs = if packs.is_empty() {
                 if !interactive && !std::io::stdin().is_terminal() {
                     bail!(
@@ -217,20 +252,51 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
                 packs
             };
 
-            let targets = install::resolve_targets(
-                &config,
-                install::TargetFlags {
-                    agent,
-                    antigravity,
-                    opencode,
-                    claude,
-                    codex,
-                    pi,
-                    cursor,
-                    global,
-                },
-                dir.as_deref(),
-            )?;
+            let has_agent_flags = agent
+                || antigravity
+                || opencode
+                || claude
+                || codex
+                || pi
+                || cursor
+                || dir.is_some();
+
+            let targets = if is_interactive && !has_agent_flags {
+                let chosen = crate::interactive::select_agents(&config, global)?;
+                if chosen.is_empty() {
+                    install::resolve_targets(
+                        &config,
+                        install::TargetFlags {
+                            agent,
+                            antigravity,
+                            opencode,
+                            claude,
+                            codex,
+                            pi,
+                            cursor,
+                            global,
+                        },
+                        dir.as_deref(),
+                    )?
+                } else {
+                    chosen
+                }
+            } else {
+                install::resolve_targets(
+                    &config,
+                    install::TargetFlags {
+                        agent,
+                        antigravity,
+                        opencode,
+                        claude,
+                        codex,
+                        pi,
+                        cursor,
+                        global,
+                    },
+                    dir.as_deref(),
+                )?
+            };
             add_skills(
                 out,
                 &packs,
