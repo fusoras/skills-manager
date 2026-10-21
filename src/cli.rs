@@ -43,9 +43,15 @@ pub enum Commands {
         /// Install a pack of skills instead of individual skills
         #[arg(long, alias = "packs")]
         pack: bool,
+        /// Install into global agent directories instead of project
+        #[arg(short = 'g', long)]
+        global: bool,
         /// Install into .agents/skills (default)
         #[arg(long, alias = "agents")]
         agent: bool,
+        /// Install into .gemini/skills (or ~/.gemini/skills with --global)
+        #[arg(long, alias = "agy")]
+        antigravity: bool,
         /// Install into .opencode/skills
         #[arg(long)]
         opencode: bool,
@@ -82,9 +88,15 @@ pub enum Commands {
         /// Remove a pack of skills instead of individual skills
         #[arg(long, alias = "packs")]
         pack: bool,
+        /// Remove from global agent directories instead of project
+        #[arg(short = 'g', long)]
+        global: bool,
         /// Remove from .agents/skills
         #[arg(long, alias = "agents")]
         agent: bool,
+        /// Remove from .gemini/skills (or ~/.gemini/skills with --global)
+        #[arg(long, alias = "agy")]
+        antigravity: bool,
         /// Remove from .opencode/skills
         #[arg(long)]
         opencode: bool,
@@ -115,6 +127,9 @@ pub enum Commands {
         /// Show status of packs instead of individual skills
         #[arg(long)]
         packs: bool,
+        /// Show status of global skills instead of current project
+        #[arg(short = 'g', long)]
+        global: bool,
     },
     /// Show or manage skill packs in the store
     Pack {
@@ -130,6 +145,9 @@ pub enum Commands {
         /// Show what would happen without writing anything
         #[arg(long)]
         dry_run: bool,
+        /// Sync global skills instead of current project
+        #[arg(short = 'g', long)]
+        global: bool,
     },
     /// List projects managed by skm on this machine
     Projects,
@@ -158,15 +176,25 @@ pub enum PackCommand {
         remove: Vec<String>,
     },
     /// Show status of packs installed in this project
-    Status,
+    Status {
+        /// Show status of global packs instead of current project
+        #[arg(short = 'g', long)]
+        global: bool,
+    },
     /// Install pack(s) into this project
     Add {
         /// Pack names to install
         #[arg(required = true, value_name = "PACK")]
         packs: Vec<String>,
+        /// Install into global agent directories instead of project
+        #[arg(short = 'g', long)]
+        global: bool,
         /// Install into .agents/skills (default)
         #[arg(long, alias = "agents")]
         agent: bool,
+        /// Install into .gemini/skills (or ~/.gemini/skills with --global)
+        #[arg(long, alias = "agy")]
+        antigravity: bool,
         /// Install into .opencode/skills
         #[arg(long)]
         opencode: bool,
@@ -200,9 +228,15 @@ pub enum PackCommand {
         /// Pack names to remove
         #[arg(required = true, value_name = "PACK")]
         packs: Vec<String>,
+        /// Remove from global agent directories instead of project
+        #[arg(short = 'g', long)]
+        global: bool,
         /// Remove from .agents/skills
         #[arg(long, alias = "agents")]
         agent: bool,
+        /// Remove from .gemini/skills (or ~/.gemini/skills with --global)
+        #[arg(long, alias = "agy")]
+        antigravity: bool,
         /// Remove from .opencode/skills
         #[arg(long)]
         opencode: bool,
@@ -393,11 +427,13 @@ mod tests {
             skills,
             pack,
             agent,
+            antigravity,
             opencode,
             claude,
             codex,
             pi,
             cursor,
+            global,
             dir,
             pin,
             force,
@@ -407,7 +443,17 @@ mod tests {
             panic!("expected `add`");
         };
         assert_eq!(skills, ["alpha", "beta"]);
-        assert!(!pack && !agent && !opencode && !claude && !codex && !pi && !cursor);
+        assert!(
+            !pack
+                && !agent
+                && !antigravity
+                && !opencode
+                && !claude
+                && !codex
+                && !pi
+                && !cursor
+                && !global
+        );
         assert!(dir.is_none());
         assert!(!pin && !force && !dry_run);
 
@@ -492,11 +538,11 @@ mod tests {
     fn status_takes_optional_packs_flag() {
         assert!(matches!(
             parse(&["status"]).command,
-            Commands::Status { packs: false }
+            Commands::Status { packs: false, .. }
         ));
         assert!(matches!(
             parse(&["status", "--packs"]).command,
-            Commands::Status { packs: true }
+            Commands::Status { packs: true, .. }
         ));
     }
 
@@ -515,7 +561,7 @@ mod tests {
         assert!(matches!(
             parse(&["pack", "status"]).command,
             Commands::Pack {
-                action: Some(PackCommand::Status)
+                action: Some(PackCommand::Status { global: false })
             }
         ));
         let Commands::Pack {
@@ -558,15 +604,63 @@ mod tests {
 
     #[test]
     fn sync_takes_force_and_dry_run() {
-        let Commands::Sync { force, dry_run } = parse(&["sync"]).command else {
-            panic!("expected `sync`");
-        };
-        assert!(!force && !dry_run);
-
-        let Commands::Sync { force, dry_run } = parse(&["sync", "--force", "--dry-run"]).command
+        let Commands::Sync {
+            force,
+            dry_run,
+            global,
+        } = parse(&["sync"]).command
         else {
             panic!("expected `sync`");
         };
-        assert!(force && dry_run);
+        assert!(!force && !dry_run && !global);
+
+        let Commands::Sync {
+            force,
+            dry_run,
+            global,
+        } = parse(&["sync", "--force", "--dry-run"]).command
+        else {
+            panic!("expected `sync`");
+        };
+        assert!(force && dry_run && !global);
+    }
+
+    #[test]
+    fn add_and_remove_take_global_and_antigravity_flags() {
+        let Commands::Add {
+            skills,
+            global,
+            antigravity,
+            ..
+        } = parse(&["add", "alpha", "--global", "--antigravity"]).command
+        else {
+            panic!("expected `add`");
+        };
+        assert_eq!(skills, ["alpha"]);
+        assert!(global);
+        assert!(antigravity);
+
+        let Commands::Remove {
+            skills,
+            global,
+            antigravity,
+            ..
+        } = parse(&["remove", "alpha", "-g", "--agy"]).command
+        else {
+            panic!("expected `remove`");
+        };
+        assert_eq!(skills, ["alpha"]);
+        assert!(global);
+        assert!(antigravity);
+
+        let Commands::Status { global, .. } = parse(&["status", "--global"]).command else {
+            panic!("expected `status`");
+        };
+        assert!(global);
+
+        let Commands::Sync { global, .. } = parse(&["sync", "-g"]).command else {
+            panic!("expected `sync`");
+        };
+        assert!(global);
     }
 }

@@ -73,7 +73,11 @@ pub struct StatusRow {
 /// Every registered skill plus every unmanaged directory, sorted by skill.
 pub fn rows(config: &Config, project: &Project) -> Result<Vec<StatusRow>> {
     let root = project.root();
-    let default_target = resolve_target(config, project, None, None)?;
+    let default_target = if project.is_global {
+        config.default_global_target.clone()
+    } else {
+        resolve_target(config, project, None, None)?
+    };
     let store_root = targets::store_root(config);
     let mut rows: Vec<StatusRow> = Vec::new();
 

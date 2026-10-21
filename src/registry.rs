@@ -24,6 +24,9 @@ pub const REGISTRY_FILE: &str = "projects.toml";
 /// The central registry of all projects.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Registry {
+    /// Global skills installed for the user across agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub global: Option<ProjectRecord>,
     /// Map from project key (e.g. `~/path/to/project` or `/var/www/project`)
     /// to its recorded configuration and installed skills.
     #[serde(
@@ -255,6 +258,11 @@ impl Registry {
     /// Persist the registry to `path`.
     pub fn save_to(&self, path: &Path) -> Result<()> {
         let mut sorted = self.clone();
+        if let Some(record) = &mut sorted.global {
+            record
+                .skills
+                .sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.target.cmp(&b.target)));
+        }
         for record in sorted.projects.values_mut() {
             record
                 .skills
@@ -268,6 +276,18 @@ impl Registry {
         }
         fs::write(path, format!("{HEADER}{text}"))
             .with_context(|| format!("writing {}", path.display()))
+    }
+
+    /// Return the global project record, if any.
+    #[allow(dead_code)]
+    pub fn global_record(&self) -> Option<&ProjectRecord> {
+        self.global.as_ref()
+    }
+
+    /// Return a mutable reference to the global project record, creating it if absent.
+    #[allow(dead_code)]
+    pub fn ensure_global_record(&mut self) -> &mut ProjectRecord {
+        self.global.get_or_insert_with(ProjectRecord::default)
     }
 
     /// Find the project record matching `root`.
@@ -375,6 +395,36 @@ mod tests {
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.starts_with(HEADER));
         assert!(content.contains("git-commit"));
+    }
+
+    #[test]
+    fn roundtrip_global_registry_preserves_global_record() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("projects.toml");
+
+        let mut registry = Registry::default();
+        let global = registry.ensure_global_record();
+        global.upsert(sample_skill("alpha", "~/.gemini/skills"));
+        global.upsert(sample_skill("git-commit", "~/.config/opencode/skills"));
+
+        registry.save_to(&path).unwrap();
+        let loaded = Registry::load_from(&path).unwrap();
+
+        assert_eq!(registry, loaded);
+        assert_eq!(loaded.global.as_ref().unwrap().skills.len(), 2);
+        assert_eq!(
+            loaded
+                .global_record()
+                .unwrap()
+                .get("git-commit", "~/.config/opencode/skills")
+                .unwrap()
+                .name,
+            "git-commit"
+        );
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("[[global.skill]]") || content.contains("[global]"));
+        assert!(content.contains("~/.config/opencode/skills"));
+        assert!(content.contains("~/.gemini/skills"));
     }
 
     #[test]

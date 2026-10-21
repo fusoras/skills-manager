@@ -33,6 +33,9 @@ use crate::doc;
 /// Default project-relative directory where skills are installed.
 pub const DEFAULT_TARGET: &str = ".agents/skills";
 
+/// Default user-level directory where global skills are installed.
+pub const DEFAULT_GLOBAL_TARGET: &str = "~/.agents/skills";
+
 /// Directory created inside the user config dir.
 pub const CONFIG_SUBDIR: &str = "skm";
 
@@ -52,9 +55,15 @@ pub struct Config {
     /// Project-relative directory that skills are copied into.
     #[serde(default = "default_target")]
     pub default_target: String,
+    /// User directory that global skills are copied into.
+    #[serde(default = "default_global_target")]
+    pub default_global_target: String,
     /// Agent name to project-relative skills directory (used by later phases).
     #[serde(default = "default_agents")]
     pub agents: BTreeMap<String, String>,
+    /// Agent name to user-level global skills directory.
+    #[serde(default = "default_global_agents")]
+    pub global_agents: BTreeMap<String, String>,
     /// Watch settings (used by later phases).
     #[serde(default)]
     pub watch: Watch,
@@ -65,7 +74,9 @@ impl Default for Config {
         Self {
             store: None,
             default_target: default_target(),
+            default_global_target: default_global_target(),
             agents: default_agents(),
+            global_agents: default_global_agents(),
             watch: Watch::default(),
         }
     }
@@ -79,12 +90,38 @@ impl Config {
 
     /// Target directory for an agent.
     pub fn agent_target(&self, agent: &str) -> String {
-        if let Some(target) = self.agents.get(agent) {
+        let normalized = match agent {
+            "agy" => "antigravity",
+            other => other,
+        };
+        if let Some(target) = self.agents.get(normalized) {
             return target.clone();
         }
-        match agent {
+        match normalized {
             "agent" | "agents" => self.default_target.clone(),
-            _ => format!(".{agent}/skills"),
+            "antigravity" => ".gemini/skills".to_owned(),
+            _ => format!(".{normalized}/skills"),
+        }
+    }
+
+    /// Global target directory for an agent.
+    pub fn global_agent_target(&self, agent: &str) -> String {
+        let normalized = match agent {
+            "agy" => "antigravity",
+            other => other,
+        };
+        if let Some(target) = self.global_agents.get(normalized) {
+            return target.clone();
+        }
+        match normalized {
+            "agent" | "agents" => self.default_global_target.clone(),
+            "antigravity" => "~/.gemini/skills".to_owned(),
+            "opencode" => "~/.config/opencode/skills".to_owned(),
+            "pi" => "~/.pi/agent/skills".to_owned(),
+            "claude" => "~/.claude/skills".to_owned(),
+            "codex" => "~/.codex/skills".to_owned(),
+            "cursor" => "~/.cursor/skills".to_owned(),
+            _ => format!("~/.{normalized}/skills"),
         }
     }
 }
@@ -109,13 +146,32 @@ fn default_target() -> String {
     DEFAULT_TARGET.to_owned()
 }
 
+fn default_global_target() -> String {
+    DEFAULT_GLOBAL_TARGET.to_owned()
+}
+
 fn default_debounce_ms() -> u64 {
     500
 }
 
 fn default_agents() -> BTreeMap<String, String> {
     let mut agents = BTreeMap::new();
+    agents.insert("antigravity".to_owned(), ".gemini/skills".to_owned());
     agents.insert("opencode".to_owned(), ".opencode/skills".to_owned());
+    agents
+}
+
+fn default_global_agents() -> BTreeMap<String, String> {
+    let mut agents = BTreeMap::new();
+    agents.insert("antigravity".to_owned(), "~/.gemini/skills".to_owned());
+    agents.insert(
+        "opencode".to_owned(),
+        "~/.config/opencode/skills".to_owned(),
+    );
+    agents.insert("pi".to_owned(), "~/.pi/agent/skills".to_owned());
+    agents.insert("claude".to_owned(), "~/.claude/skills".to_owned());
+    agents.insert("codex".to_owned(), "~/.codex/skills".to_owned());
+    agents.insert("cursor".to_owned(), "~/.cursor/skills".to_owned());
     agents
 }
 
@@ -224,6 +280,25 @@ mod tests {
             Some(".opencode/skills")
         );
         assert_eq!(config.watch.debounce_ms, 500);
+    }
+
+    #[test]
+    fn global_agent_targets_resolve_correctly() {
+        let config = Config::default();
+        assert_eq!(config.default_global_target, "~/.agents/skills");
+        assert_eq!(
+            config.global_agent_target("opencode"),
+            "~/.config/opencode/skills"
+        );
+        assert_eq!(config.global_agent_target("pi"), "~/.pi/agent/skills");
+        assert_eq!(
+            config.global_agent_target("antigravity"),
+            "~/.gemini/skills"
+        );
+        assert_eq!(config.global_agent_target("agy"), "~/.gemini/skills");
+        assert_eq!(config.global_agent_target("claude"), "~/.claude/skills");
+        assert_eq!(config.agent_target("antigravity"), ".gemini/skills");
+        assert_eq!(config.agent_target("agy"), ".gemini/skills");
     }
 
     #[test]

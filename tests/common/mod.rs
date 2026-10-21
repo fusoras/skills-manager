@@ -309,9 +309,19 @@ pub fn make_executable(path: &Path) {
 }
 
 pub const DEFAULT_CONFIG: &str = "default_target = \".agents/skills\"\n\
-                              \n\
-                              [agents]\n\
-                              opencode = \".opencode/skills\"\n\
-                              \n\
-                              [watch]\n\
-                              debounce_ms = 500\n";
+                                  default_global_target = \"~/.agents/skills\"\n\
+                                  \n\
+                                  [agents]\n\
+                                  antigravity = \".gemini/skills\"\n\
+                                  opencode = \".opencode/skills\"\n\
+                                  \n\
+                                  [global_agents]\n\
+                                  antigravity = \"~/.gemini/skills\"\n\
+                                  claude = \"~/.claude/skills\"\n\
+                                  codex = \"~/.codex/skills\"\n\
+                                  cursor = \"~/.cursor/skills\"\n\
+                                  opencode = \"~/.config/opencode/skills\"\n\
+                                  pi = \"~/.pi/agent/skills\"\n\
+                                  \n\
+                                  [watch]\n\
+                                  debounce_ms = 500\n";

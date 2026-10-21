@@ -62,17 +62,25 @@ pub fn candidate(config: &Config, name: &str) -> Result<Candidate> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TargetFlags {
     pub agent: bool,
+    pub antigravity: bool,
     pub opencode: bool,
     pub claude: bool,
     pub codex: bool,
     pub pi: bool,
     pub cursor: bool,
+    pub global: bool,
 }
 
 impl TargetFlags {
     /// Returns `true` if any agent flag was specified.
     pub fn any(self) -> bool {
-        self.agent || self.opencode || self.claude || self.codex || self.pi || self.cursor
+        self.agent
+            || self.antigravity
+            || self.opencode
+            || self.claude
+            || self.codex
+            || self.pi
+            || self.cursor
     }
 }
 
@@ -86,32 +94,68 @@ pub fn resolve_targets(
     dir: Option<&str>,
 ) -> Result<Vec<String>> {
     let mut targets = Vec::new();
-    if flags.agent {
-        targets.push(config.agent_target("agent"));
-    }
-    if flags.opencode {
-        targets.push(config.agent_target("opencode"));
-    }
-    if flags.claude {
-        targets.push(config.agent_target("claude"));
-    }
-    if flags.codex {
-        targets.push(config.agent_target("codex"));
-    }
-    if flags.pi {
-        targets.push(config.agent_target("pi"));
-    }
-    if flags.cursor {
-        targets.push(config.agent_target("cursor"));
-    }
-    if let Some(dir) = dir {
-        if dir.trim().is_empty() {
-            bail!("--dir must not be empty");
+    if flags.global {
+        if flags.agent {
+            targets.push(config.global_agent_target("agent"));
         }
-        targets.push(dir.to_owned());
-    }
-    if targets.is_empty() {
-        targets.push(config.agent_target("agent"));
+        if flags.antigravity {
+            targets.push(config.global_agent_target("antigravity"));
+        }
+        if flags.opencode {
+            targets.push(config.global_agent_target("opencode"));
+        }
+        if flags.claude {
+            targets.push(config.global_agent_target("claude"));
+        }
+        if flags.codex {
+            targets.push(config.global_agent_target("codex"));
+        }
+        if flags.pi {
+            targets.push(config.global_agent_target("pi"));
+        }
+        if flags.cursor {
+            targets.push(config.global_agent_target("cursor"));
+        }
+        if let Some(dir) = dir {
+            if dir.trim().is_empty() {
+                bail!("--dir must not be empty");
+            }
+            targets.push(dir.to_owned());
+        }
+        if targets.is_empty() {
+            targets.push(config.global_agent_target("agent"));
+        }
+    } else {
+        if flags.agent {
+            targets.push(config.agent_target("agent"));
+        }
+        if flags.antigravity {
+            targets.push(config.agent_target("antigravity"));
+        }
+        if flags.opencode {
+            targets.push(config.agent_target("opencode"));
+        }
+        if flags.claude {
+            targets.push(config.agent_target("claude"));
+        }
+        if flags.codex {
+            targets.push(config.agent_target("codex"));
+        }
+        if flags.pi {
+            targets.push(config.agent_target("pi"));
+        }
+        if flags.cursor {
+            targets.push(config.agent_target("cursor"));
+        }
+        if let Some(dir) = dir {
+            if dir.trim().is_empty() {
+                bail!("--dir must not be empty");
+            }
+            targets.push(dir.to_owned());
+        }
+        if targets.is_empty() {
+            targets.push(config.agent_target("agent"));
+        }
     }
     targets.dedup();
     Ok(targets)
@@ -130,29 +174,62 @@ pub fn resolve_remove_targets(
         return Ok(Vec::new());
     }
     let mut targets = Vec::new();
-    if flags.agent {
-        targets.push(config.agent_target("agent"));
-    }
-    if flags.opencode {
-        targets.push(config.agent_target("opencode"));
-    }
-    if flags.claude {
-        targets.push(config.agent_target("claude"));
-    }
-    if flags.codex {
-        targets.push(config.agent_target("codex"));
-    }
-    if flags.pi {
-        targets.push(config.agent_target("pi"));
-    }
-    if flags.cursor {
-        targets.push(config.agent_target("cursor"));
-    }
-    if let Some(dir) = dir {
-        if dir.trim().is_empty() {
-            bail!("--dir must not be empty");
+    if flags.global {
+        if flags.agent {
+            targets.push(config.global_agent_target("agent"));
         }
-        targets.push(dir.to_owned());
+        if flags.antigravity {
+            targets.push(config.global_agent_target("antigravity"));
+        }
+        if flags.opencode {
+            targets.push(config.global_agent_target("opencode"));
+        }
+        if flags.claude {
+            targets.push(config.global_agent_target("claude"));
+        }
+        if flags.codex {
+            targets.push(config.global_agent_target("codex"));
+        }
+        if flags.pi {
+            targets.push(config.global_agent_target("pi"));
+        }
+        if flags.cursor {
+            targets.push(config.global_agent_target("cursor"));
+        }
+        if let Some(dir) = dir {
+            if dir.trim().is_empty() {
+                bail!("--dir must not be empty");
+            }
+            targets.push(dir.to_owned());
+        }
+    } else {
+        if flags.agent {
+            targets.push(config.agent_target("agent"));
+        }
+        if flags.antigravity {
+            targets.push(config.agent_target("antigravity"));
+        }
+        if flags.opencode {
+            targets.push(config.agent_target("opencode"));
+        }
+        if flags.claude {
+            targets.push(config.agent_target("claude"));
+        }
+        if flags.codex {
+            targets.push(config.agent_target("codex"));
+        }
+        if flags.pi {
+            targets.push(config.agent_target("pi"));
+        }
+        if flags.cursor {
+            targets.push(config.agent_target("cursor"));
+        }
+        if let Some(dir) = dir {
+            if dir.trim().is_empty() {
+                bail!("--dir must not be empty");
+            }
+            targets.push(dir.to_owned());
+        }
     }
     targets.dedup();
     Ok(targets)
@@ -349,7 +426,11 @@ pub fn plan_add(
 
         for target in &targets {
             let dest_dir = target_dir(root, target).join(&candidate.skill.name);
-            let dest_rel = skill::relative_path(&dest_dir, root);
+            let dest_rel = if target.starts_with('~') {
+                format!("{target}/{}", candidate.skill.name)
+            } else {
+                skill::relative_path(&dest_dir, root)
+            };
             let existing = project.record.get(&candidate.skill.name, target);
 
             let dest_exists = dest_dir.exists();
@@ -567,9 +648,14 @@ pub fn plan_remove(
             let mut copies = Vec::new();
             for entry in &entries {
                 let dest_dir = installed_dir(root, &entry.target, &skill_name);
+                let dest_rel = if entry.target.starts_with('~') {
+                    format!("{}/{}", entry.target, skill_name)
+                } else {
+                    skill::relative_path(&dest_dir, root)
+                };
                 copies.push(InstalledCopy {
                     target: entry.target.clone(),
-                    dest_rel: skill::relative_path(&dest_dir, root),
+                    dest_rel,
                     dest_dir,
                 });
             }
@@ -643,9 +729,14 @@ pub fn plan_remove(
             let mut copies = Vec::new();
             for entry in &entries {
                 let dest_dir = installed_dir(root, &entry.target, name);
+                let dest_rel = if entry.target.starts_with('~') {
+                    format!("{}/{}", entry.target, name)
+                } else {
+                    skill::relative_path(&dest_dir, root)
+                };
                 copies.push(InstalledCopy {
                     target: entry.target.clone(),
-                    dest_rel: skill::relative_path(&dest_dir, root),
+                    dest_rel,
                     dest_dir,
                 });
             }

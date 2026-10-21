@@ -5,11 +5,12 @@ what exists today; this file keeps what is still missing.
 
 ## Status
 
-**Implemented: M0 – M3** (203 tests green).
+**Implemented: M0 – M3 + Global Agent Skills** (212 tests green).
 - The store is **global and unique**: one directory per machine, registered by path.
 - **Zero-pollution architecture**: target projects contain NO `skills.toml`, NO `.skills-manager/` directory, and require NO `.gitignore` changes. All project metadata, targets, pins, tree hashes, and detached tombstones live centrally in `~/.local/state/skm/projects.toml`.
 - Added `skm projects` command to list all managed projects on the machine.
 - **Packs (M3)**: named collections in `<store>/packs/<name>.toml` installing together with reference counting and automatic detach of local modifications. Supported via `skm pack [list|show|edit|status|add|remove]` and flags `--pack` / `--packs`.
+- **Global Agent Skills**: `--global` (`-g`) flag to install, remove, inspect (`status`), and `sync` user-level skills across agents: Antigravity CLI (`~/.gemini/skills`, `--agy`), OpenCode (`~/.config/opencode/skills`), Pi (`~/.pi/agent/skills`), Claude (`~/.claude/skills`), Codex, and Cursor. Agent-targeted removal (`skm remove <skill> --global --<agent>`) safely deletes skills per agent without touching others.
 
 | Phase | Scope | State |
 | --- | --- | --- |

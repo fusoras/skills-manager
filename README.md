@@ -93,6 +93,7 @@ permissions.
 Targets are chosen via agent flags:
 
 - `--agent` (or alias `--agents`): standard agents directory (`.agents/skills`) — **default** if no flag is given
+- `--antigravity` (or alias `--agy`): Antigravity CLI directory (`.gemini/skills`)
 - `--opencode`: OpenCode directory (`.opencode/skills`)
 - `--claude`: Claude directory (`.claude/skills`)
 - `--codex`: Codex directory (`.codex/skills`)
@@ -106,6 +107,29 @@ agent targets simultaneously:
 ```sh
 skm add git-commit --opencode --pi --codex
 ```
+
+### Global Agent Skills
+
+Pass `--global` (or `-g`) to manage skills across your user environment rather than inside a specific project:
+
+```sh
+skm add git-commit --global --opencode      # installs to ~/.config/opencode/skills/git-commit
+skm add git-commit -g --agy                 # installs to ~/.gemini/skills/git-commit
+skm add git-commit --global --pi            # installs to ~/.pi/agent/skills/git-commit
+
+skm status --global                         # view status of all global skills
+skm sync --global                           # reconcile global skills with the store
+skm remove git-commit --global --opencode   # deletes only from OpenCode's global directory
+```
+
+Global agent targets:
+- Antigravity CLI (`--antigravity` / `--agy`): `~/.gemini/skills`
+- OpenCode (`--opencode`): `~/.config/opencode/skills`
+- Pi (`--pi`): `~/.pi/agent/skills`
+- Claude (`--claude`): `~/.claude/skills`
+- Codex (`--codex`): `~/.codex/skills`
+- Cursor (`--cursor`): `~/.cursor/skills`
+- Default Agent (`--agent`): `~/.agents/skills`
 
 Each skill lands in `<target>/<skill name>`. `skm add` records the project and the
 skills in `~/.local/state/skm/projects.toml`.

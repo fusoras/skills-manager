@@ -149,12 +149,17 @@ impl SyncPlan {
     /// A plan for the copy of `skill` in `target`, without a decision yet.
     fn new(skill: &str, target: &str, root: &Path, action: SyncAction) -> Self {
         let dest_dir = installed_dir(root, target, skill);
+        let dest_rel = if target.starts_with('~') {
+            format!("{target}/{skill}")
+        } else {
+            skill::relative_path(&dest_dir, root)
+        };
         Self {
             skill: skill.to_owned(),
             target: target.to_owned(),
             source_dir: None,
             source_rel: String::new(),
-            dest_rel: skill::relative_path(&dest_dir, root),
+            dest_rel,
             dest_dir,
             action,
             skip: None,
@@ -182,7 +187,11 @@ struct Source {
 /// Plan the reconciliation of every recorded skill, validating before any write.
 pub fn plan_sync(config: &Config, project: &Project, force: bool) -> Result<Vec<SyncPlan>> {
     let root = project.root();
-    let default_target = resolve_target(config, project, None, None)?;
+    let default_target = if project.is_global {
+        config.default_global_target.clone()
+    } else {
+        resolve_target(config, project, None, None)?
+    };
     let now = registry::now_epoch();
     let mut plans: Vec<SyncPlan> = Vec::new();
 

@@ -33,6 +33,8 @@ pub struct Project {
     registry_path: PathBuf,
     /// Configuration and installed skills from the central registry.
     pub record: ProjectRecord,
+    /// Whether this project represents global user-level skills.
+    pub is_global: bool,
 }
 
 impl Project {
@@ -59,6 +61,25 @@ impl Project {
             root: canonical,
             registry_path: registry_path.to_path_buf(),
             record,
+            is_global: false,
+        })
+    }
+
+    /// Open the global pseudo-project for user-level agent skills.
+    pub fn open_global() -> Result<Self> {
+        Self::open_global_with(&crate::registry::path()?)
+    }
+
+    /// [`Project::open_global`] with an explicit registry path (used in tests and isolation).
+    pub fn open_global_with(registry_path: &Path) -> Result<Self> {
+        let root = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let registry = Registry::load_from(registry_path)?;
+        let record = registry.global.clone().unwrap_or_default();
+        Ok(Self {
+            root,
+            registry_path: registry_path.to_path_buf(),
+            record,
+            is_global: true,
         })
     }
 
@@ -72,7 +93,13 @@ impl Project {
     /// Leaves the project directory completely clean: zero metadata files.
     pub fn save(&self) -> Result<()> {
         let mut registry = Registry::load_from(&self.registry_path)?;
-        if self.record.is_empty() {
+        if self.is_global {
+            if self.record.is_empty() {
+                registry.global = None;
+            } else {
+                registry.global = Some(self.record.clone());
+            }
+        } else if self.record.is_empty() {
             registry.remove_project(&self.root);
         } else {
             *registry.ensure_project(&self.root) = self.record.clone();
@@ -132,5 +159,25 @@ mod tests {
         // Central registry must exist and contain the project
         let registry = Registry::load_from(&registry_path).unwrap();
         assert!(registry.get_project(&project_dir).is_some());
+    }
+
+    #[test]
+    fn open_global_and_save_updates_registry_global() {
+        let tmp = tempfile::tempdir().unwrap();
+        let registry_path = tmp.path().join("state").join("projects.toml");
+
+        let mut global = Project::open_global_with(&registry_path).unwrap();
+        assert!(global.is_global);
+        assert_eq!(global.record, ProjectRecord::default());
+
+        global.record.target = Some("~/.agents/skills".to_owned());
+        global.save().unwrap();
+
+        let registry = Registry::load_from(&registry_path).unwrap();
+        assert_eq!(
+            registry.global.as_ref().and_then(|g| g.target.as_deref()),
+            Some("~/.agents/skills")
+        );
+        assert!(registry.projects.is_empty());
     }
 }

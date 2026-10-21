@@ -37,7 +37,9 @@ pub fn known_targets(project: &Project, default_target: &str) -> Vec<String> {
         .iter()
         .map(|target| (*target).to_owned())
         .collect();
-    targets.push(default_target.to_owned());
+    if !project.is_global {
+        targets.push(default_target.to_owned());
+    }
     targets.sort();
     targets.dedup();
     targets

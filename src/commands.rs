@@ -51,7 +51,9 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
         Commands::Add {
             skills,
             pack,
+            global,
             agent,
+            antigravity,
             opencode,
             claude,
             codex,
@@ -67,11 +69,13 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
                 &config,
                 install::TargetFlags {
                     agent,
+                    antigravity,
                     opencode,
                     claude,
                     codex,
                     pi,
                     cursor,
+                    global,
                 },
                 dir.as_deref(),
             )?;
@@ -84,13 +88,16 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
                     force,
                     pack,
                 },
+                global,
                 dry_run,
             )
         }
         Commands::Remove {
             skills,
             pack,
+            global,
             agent,
+            antigravity,
             opencode,
             claude,
             codex,
@@ -105,11 +112,13 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
                 &config,
                 install::TargetFlags {
                     agent,
+                    antigravity,
                     opencode,
                     claude,
                     codex,
                     pi,
                     cursor,
+                    global,
                 },
                 dir.as_deref(),
             )?;
@@ -121,18 +130,23 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
                     force,
                     pack,
                 },
+                global,
                 dry_run,
             )
         }
-        Commands::Status { packs } => {
+        Commands::Status { packs, global } => {
             if packs {
-                pack_status(out)
+                pack_status(out, global)
             } else {
-                status_cmd(out)
+                status_cmd(out, global)
             }
         }
         Commands::Pack { action } => pack_cmd(out, action),
-        Commands::Sync { force, dry_run } => sync_cmd(out, force, dry_run),
+        Commands::Sync {
+            force,
+            dry_run,
+            global,
+        } => sync_cmd(out, force, dry_run, global),
         Commands::Projects => projects_cmd(out),
     }
 }
@@ -142,10 +156,12 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
         PackCommand::List => list_packs(out),
         PackCommand::Show { name } => pack_show(out, &name),
         PackCommand::Edit { name, add, remove } => pack_edit(out, &name, &add, &remove),
-        PackCommand::Status => pack_status(out),
+        PackCommand::Status { global } => pack_status(out, global),
         PackCommand::Add {
             packs,
+            global,
             agent,
+            antigravity,
             opencode,
             claude,
             codex,
@@ -161,11 +177,13 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
                 &config,
                 install::TargetFlags {
                     agent,
+                    antigravity,
                     opencode,
                     claude,
                     codex,
                     pi,
                     cursor,
+                    global,
                 },
                 dir.as_deref(),
             )?;
@@ -178,12 +196,15 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
                     force,
                     pack: true,
                 },
+                global,
                 dry_run,
             )
         }
         PackCommand::Remove {
             packs,
+            global,
             agent,
+            antigravity,
             opencode,
             claude,
             codex,
@@ -198,11 +219,13 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
                 &config,
                 install::TargetFlags {
                     agent,
+                    antigravity,
                     opencode,
                     claude,
                     codex,
                     pi,
                     cursor,
+                    global,
                 },
                 dir.as_deref(),
             )?;
@@ -214,6 +237,7 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
                     force,
                     pack: true,
                 },
+                global,
                 dry_run,
             )
         }
@@ -225,10 +249,15 @@ fn add_skills(
     out: &mut Printer,
     names: &[String],
     options: install::AddOptions,
+    global: bool,
     dry_run: bool,
 ) -> Result<()> {
     let config = config::load()?;
-    let mut project = Project::open()?;
+    let mut project = if global {
+        Project::open_global()?
+    } else {
+        Project::open()?
+    };
     let batch = install::plan_add(&config, &project, names, &options)?;
 
     if !dry_run {
@@ -275,10 +304,15 @@ fn remove_skills(
     out: &mut Printer,
     names: &[String],
     options: install::RemoveOptions,
+    global: bool,
     dry_run: bool,
 ) -> Result<()> {
     let config = config::load()?;
-    let mut project = Project::open()?;
+    let mut project = if global {
+        Project::open_global()?
+    } else {
+        Project::open()?
+    };
     let batch = install::plan_remove(&config, &project, names, &options)?;
 
     if !dry_run {
@@ -342,9 +376,13 @@ fn remove_line(style: Style, plan: &RemovePlan, dry_run: bool) -> String {
 }
 
 /// `skm sync`: reconcile every declared copy, then report the plan.
-fn sync_cmd(out: &mut Printer, force: bool, dry_run: bool) -> Result<()> {
+fn sync_cmd(out: &mut Printer, force: bool, dry_run: bool, global: bool) -> Result<()> {
     let config = config::load()?;
-    let mut project = Project::open()?;
+    let mut project = if global {
+        Project::open_global()?
+    } else {
+        Project::open()?
+    };
     let plans = sync::plan_sync(&config, &project, force)?;
 
     if !dry_run {
@@ -352,7 +390,12 @@ fn sync_cmd(out: &mut Printer, force: bool, dry_run: bool) -> Result<()> {
     }
 
     if plans.is_empty() {
-        out.line("Nothing to sync: no skills registered in this project and nothing found in the target directories.")?;
+        let empty_msg = if global {
+            "Nothing to sync: no global skills registered and nothing found in the target directories."
+        } else {
+            "Nothing to sync: no skills registered in this project and nothing found in the target directories."
+        };
+        out.line(empty_msg)?;
         return Ok(());
     }
 
@@ -410,12 +453,21 @@ fn sync_summary(plans: &[SyncPlan]) -> String {
 }
 
 /// `skm status`: read only summary of every declared and unmanaged skill.
-fn status_cmd(out: &mut Printer) -> Result<()> {
+fn status_cmd(out: &mut Printer, global: bool) -> Result<()> {
     let config = config::load()?;
-    let project = Project::open()?;
+    let project = if global {
+        Project::open_global()?
+    } else {
+        Project::open()?
+    };
     let found = status::rows(&config, &project)?;
     if found.is_empty() {
-        out.line("Nothing to report: no skills registered in this project and nothing found in the target directories.")?;
+        let empty_msg = if global {
+            "Nothing to report: no global skills registered and nothing found in the target directories."
+        } else {
+            "Nothing to report: no skills registered in this project and nothing found in the target directories."
+        };
+        out.line(empty_msg)?;
         return Ok(());
     }
 
@@ -706,11 +758,20 @@ fn pack_show(out: &mut Printer, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn pack_status(out: &mut Printer) -> Result<()> {
+fn pack_status(out: &mut Printer, global: bool) -> Result<()> {
     let config = config::load()?;
-    let project = Project::open()?;
+    let project = if global {
+        Project::open_global()?
+    } else {
+        Project::open()?
+    };
     if project.record.packs.is_empty() {
-        out.line("No packs registered in this project.")?;
+        let empty_msg = if global {
+            "No global packs registered."
+        } else {
+            "No packs registered in this project."
+        };
+        out.line(empty_msg)?;
         return Ok(());
     }
     let store_root = targets::store_root(&config);
