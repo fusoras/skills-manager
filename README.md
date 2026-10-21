@@ -94,9 +94,9 @@ When run without arguments (e.g. `skm add`) in an interactive terminal or with t
 
 ```text
 ? Select skills to install:
-[x] git-commit          Write conventional commit messages
-[ ] rust-best-practices Idiomatic Rust guide
-[x] strict-testing      Red-green verification
+[x] git-commit
+[ ] rust-best-practices
+[x] strict-testing
 > Press <space> to toggle, <enter> to confirm
 ```
 
