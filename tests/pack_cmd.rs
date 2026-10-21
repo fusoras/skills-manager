@@ -380,3 +380,15 @@ fn pack_edit_add_and_remove_skills() {
     assert!(stdout.is_empty());
     assert!(stderr.contains("skill 'nonexistent' not found in the store"));
 }
+
+#[test]
+fn pack_add_without_arguments_in_non_interactive_terminal_fails() {
+    let (sandbox, _store, project) = ready();
+
+    let (stdout, stderr) = failure_of(sandbox.skm_in(&project).args(["pack", "add"]));
+    assert!(stdout.is_empty());
+    assert!(
+        stderr.contains("pack argument required when running non-interactively"),
+        "{stderr}"
+    );
+}

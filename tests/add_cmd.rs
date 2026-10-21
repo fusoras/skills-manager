@@ -376,3 +376,15 @@ fn add_leaves_the_store_untouched() {
     );
     assert_clean_project(&project);
 }
+
+#[test]
+fn add_without_arguments_in_non_interactive_terminal_fails() {
+    let (sandbox, _store, project) = ready();
+
+    let (stdout, stderr) = failure_of(sandbox.skm_in(&project).args(["add"]));
+    assert!(stdout.is_empty());
+    assert!(
+        stderr.contains("skill argument required when running non-interactively"),
+        "{stderr}"
+    );
+}

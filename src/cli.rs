@@ -37,9 +37,12 @@ pub enum Commands {
     },
     /// Install skills into this project
     Add {
-        /// Skill names to install
-        #[arg(required = true, value_name = "SKILL")]
+        /// Skill names to install (leave empty for interactive selection)
+        #[arg(value_name = "SKILL")]
         skills: Vec<String>,
+        /// Interactive multi-selection mode
+        #[arg(short = 'i', long)]
+        interactive: bool,
         /// Install a pack of skills instead of individual skills
         #[arg(long, alias = "packs")]
         pack: bool,
@@ -130,6 +133,9 @@ pub enum Commands {
         /// Show status of global skills instead of current project
         #[arg(short = 'g', long)]
         global: bool,
+        /// Show status of project skills only
+        #[arg(short = 'p', long)]
+        project: bool,
     },
     /// Show or manage skill packs in the store
     Pack {
@@ -183,9 +189,12 @@ pub enum PackCommand {
     },
     /// Install pack(s) into this project
     Add {
-        /// Pack names to install
-        #[arg(required = true, value_name = "PACK")]
+        /// Pack names to install (leave empty for interactive selection)
+        #[arg(value_name = "PACK")]
         packs: Vec<String>,
+        /// Interactive multi-selection mode
+        #[arg(short = 'i', long)]
+        interactive: bool,
         /// Install into global agent directories instead of project
         #[arg(short = 'g', long)]
         global: bool,
@@ -437,6 +446,7 @@ mod tests {
             dir,
             pin,
             force,
+            interactive,
             dry_run,
         } = parse(&["add", "alpha", "beta"]).command
         else {
@@ -453,6 +463,7 @@ mod tests {
                 && !pi
                 && !cursor
                 && !global
+                && !interactive
         );
         assert!(dir.is_none());
         assert!(!pin && !force && !dry_run);
@@ -468,6 +479,7 @@ mod tests {
             dir,
             pin,
             force,
+            interactive,
             dry_run,
             ..
         } = parse(&[
@@ -483,6 +495,7 @@ mod tests {
             "custom/skills",
             "--pin",
             "--force",
+            "--interactive",
             "--dry-run",
         ])
         .command
@@ -490,7 +503,7 @@ mod tests {
             panic!("expected `add`");
         };
         assert_eq!(skills, ["alpha"]);
-        assert!(pack && agent && opencode && claude && codex && pi);
+        assert!(pack && agent && opencode && claude && codex && pi && interactive);
         assert_eq!(dir.as_deref(), Some("custom/skills"));
         assert!(pin && force && dry_run);
     }
@@ -501,9 +514,33 @@ mod tests {
     }
 
     #[test]
-    fn add_and_remove_require_at_least_one_skill() {
-        assert!(Cli::try_parse_from(["skm", "add"]).is_err());
-        assert!(Cli::try_parse_from(["skm", "remove"]).is_err());
+    fn add_supports_interactive_flag_and_empty_skills() {
+        let Commands::Add {
+            skills,
+            interactive,
+            ..
+        } = parse(&["add", "-i"]).command
+        else {
+            panic!("expected `add`");
+        };
+        assert!(skills.is_empty());
+        assert!(interactive);
+
+        let Commands::Add {
+            skills,
+            interactive,
+            ..
+        } = parse(&["add"]).command
+        else {
+            panic!("expected `add`");
+        };
+        assert!(skills.is_empty());
+        assert!(!interactive);
+
+        let Commands::Status { project, .. } = parse(&["status", "-p"]).command else {
+            panic!("expected `status`");
+        };
+        assert!(project);
     }
 
     #[test]

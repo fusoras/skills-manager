@@ -216,3 +216,48 @@ fn status_keeps_the_store_untouched() {
     assert_eq!(tree(&store), before);
     assert_clean_project(&project);
 }
+
+#[test]
+fn status_unified_shows_both_project_and_global_sections() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.path("store");
+    sandbox.skill(&store, "alpha", Some("alpha"));
+    sandbox.skill(&store, "beta", Some("beta"));
+    sandbox.register_store(&store);
+    let project = sandbox.project();
+
+    // Project skill: alpha
+    stdout_of(sandbox.skm_in(&project).args(["add", "alpha"]));
+    // Global skill: beta
+    stdout_of(
+        sandbox
+            .skm_in(&project)
+            .args(["add", "beta", "--global", "--opencode"]),
+    );
+
+    // Unified status (no flags)
+    let unified = stdout_of(sandbox.skm_in(&project).args(["status"]));
+    assert!(unified.contains("Project ("), "{unified}");
+    assert!(unified.contains("Global Agents (~)"), "{unified}");
+    assert!(unified.contains("alpha"), "{unified}");
+    assert!(unified.contains("beta"), "{unified}");
+
+    // Project-only status (-p)
+    let project_only = stdout_of(sandbox.skm_in(&project).args(["status", "-p"]));
+    assert!(
+        !project_only.contains("Global Agents (~)"),
+        "{project_only}"
+    );
+    assert!(project_only.contains("alpha"), "{project_only}");
+    assert!(!project_only.contains("beta"), "{project_only}");
+
+    // Global-only status (-g)
+    let global_only = stdout_of(sandbox.skm_in(&project).args(["status", "-g"]));
+    assert!(!global_only.contains("Project ("), "{global_only}");
+    assert!(!global_only.contains("alpha"), "{global_only}");
+    assert!(global_only.contains("beta"), "{global_only}");
+    assert!(
+        global_only.contains("~/.config/opencode/skills"),
+        "{global_only}"
+    );
+}

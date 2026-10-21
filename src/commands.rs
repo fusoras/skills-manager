@@ -7,6 +7,8 @@
 //! found from the working directory: `add`, `remove` and `sync` write
 //! `skills.toml` and `.skills-manager/state.toml`, `status` only reads.
 
+use std::io::IsTerminal;
+
 use anyhow::{Context, Result, bail};
 
 use crate::cli::{Cli, Commands, ConfigCommand, PackCommand, StoreCommand};
@@ -50,6 +52,7 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
         }
         Commands::Add {
             skills,
+            interactive,
             pack,
             global,
             agent,
@@ -65,6 +68,26 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
             dry_run,
         } => {
             let config = config::load()?;
+            let skills = if skills.is_empty() {
+                if !interactive && !std::io::stdin().is_terminal() {
+                    bail!(
+                        "skill argument required when running non-interactively; use -i or pass skill names"
+                    );
+                }
+                let chosen = if pack {
+                    crate::interactive::select_packs(&config)?
+                } else {
+                    crate::interactive::select_skills(&config)?
+                };
+                if chosen.is_empty() {
+                    out.line("No skills selected.")?;
+                    return Ok(());
+                }
+                chosen
+            } else {
+                skills
+            };
+
             let targets = install::resolve_targets(
                 &config,
                 install::TargetFlags {
@@ -134,11 +157,15 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
                 dry_run,
             )
         }
-        Commands::Status { packs, global } => {
+        Commands::Status {
+            packs,
+            global,
+            project,
+        } => {
             if packs {
                 pack_status(out, global)
             } else {
-                status_cmd(out, global)
+                status_cmd(out, global, project)
             }
         }
         Commands::Pack { action } => pack_cmd(out, action),
@@ -159,6 +186,7 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
         PackCommand::Status { global } => pack_status(out, global),
         PackCommand::Add {
             packs,
+            interactive,
             global,
             agent,
             antigravity,
@@ -173,6 +201,22 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
             dry_run,
         } => {
             let config = config::load()?;
+            let packs = if packs.is_empty() {
+                if !interactive && !std::io::stdin().is_terminal() {
+                    bail!(
+                        "pack argument required when running non-interactively; use -i or pass pack names"
+                    );
+                }
+                let chosen = crate::interactive::select_packs(&config)?;
+                if chosen.is_empty() {
+                    out.line("No packs selected.")?;
+                    return Ok(());
+                }
+                chosen
+            } else {
+                packs
+            };
+
             let targets = install::resolve_targets(
                 &config,
                 install::TargetFlags {
@@ -453,25 +497,60 @@ fn sync_summary(plans: &[SyncPlan]) -> String {
 }
 
 /// `skm status`: read only summary of every declared and unmanaged skill.
-fn status_cmd(out: &mut Printer, global: bool) -> Result<()> {
+fn status_cmd(out: &mut Printer, global_only: bool, project_only: bool) -> Result<()> {
     let config = config::load()?;
-    let project = if global {
-        Project::open_global()?
-    } else {
-        Project::open()?
-    };
-    let found = status::rows(&config, &project)?;
-    if found.is_empty() {
-        let empty_msg = if global {
-            "Nothing to report: no global skills registered and nothing found in the target directories."
-        } else {
-            "Nothing to report: no skills registered in this project and nothing found in the target directories."
-        };
-        out.line(empty_msg)?;
+    let style = out.style();
+
+    if global_only {
+        let global_project = Project::open_global()?;
+        let found = status::rows(&config, &global_project)?;
+        if found.is_empty() {
+            out.line("Nothing to report: no global skills registered and nothing found in the target directories.")?;
+            return Ok(());
+        }
+        render_status_table(out, style, &found)?;
         return Ok(());
     }
 
-    let style = out.style();
+    if project_only {
+        let project = Project::open()?;
+        let found = status::rows(&config, &project)?;
+        if found.is_empty() {
+            out.line("Nothing to report: no skills registered in this project and nothing found in the target directories.")?;
+            return Ok(());
+        }
+        render_status_table(out, style, &found)?;
+        return Ok(());
+    }
+
+    // Unified view: inspect project first, then global
+    let project = Project::open()?;
+    let global_project = Project::open_global()?;
+    let project_found = status::rows(&config, &project)?;
+    let global_found = status::rows(&config, &global_project)?;
+
+    if project_found.is_empty() && global_found.is_empty() {
+        out.line("Nothing to report: no skills registered in this project and nothing found in the target directories.")?;
+        return Ok(());
+    }
+
+    if !global_found.is_empty() && !project_found.is_empty() {
+        out.line(&format!("Project ({})", project.root().display()))?;
+        render_status_table(out, style, &project_found)?;
+        out.line("")?;
+        out.line("Global Agents (~)")?;
+        render_status_table(out, style, &global_found)?;
+    } else if !project_found.is_empty() {
+        render_status_table(out, style, &project_found)?;
+    } else {
+        out.line("Global Agents (~)")?;
+        render_status_table(out, style, &global_found)?;
+    }
+
+    Ok(())
+}
+
+fn render_status_table(out: &mut Printer, style: Style, found: &[status::StatusRow]) -> Result<()> {
     let rows: Vec<Vec<String>> = found
         .iter()
         .map(|row| {
@@ -488,6 +567,20 @@ fn status_cmd(out: &mut Printer, global: bool) -> Result<()> {
 
 /// Colored STATE cell of `skm status`, with its note when it has one.
 fn health_cell(style: Style, health: Health) -> String {
+    let symbol = if style.is_enabled() {
+        match health {
+            Health::Ok => "✔ ",
+            Health::Modified => "✎ ",
+            Health::Behind => "↓ ",
+            Health::Pinned => "⚑ ",
+            Health::Missing => "✖ ",
+            Health::Unmanaged => "? ",
+            Health::Detached => "⤹ ",
+            Health::Skipped => "○ ",
+        }
+    } else {
+        ""
+    };
     let label = match health {
         Health::Ok => style.ok(health.label()),
         Health::Pinned | Health::Detached | Health::Skipped => style.ident(health.label()),
@@ -495,8 +588,8 @@ fn health_cell(style: Style, health: Health) -> String {
         Health::Missing | Health::Unmanaged => style.fail(health.label()),
     };
     match health.note() {
-        Some(note) => format!("{label} ({note})"),
-        None => label,
+        Some(note) => format!("{symbol}{label} ({note})"),
+        None => format!("{symbol}{label}"),
     }
 }
 
@@ -887,4 +980,32 @@ fn open_in_editor(path: &std::path::Path) -> Result<()> {
         bail!("editor exited with non-zero status");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::Style;
+    use crate::status::Health;
+
+    #[test]
+    fn health_cell_renders_symbols_when_style_enabled() {
+        let style = Style::colored();
+        assert!(health_cell(style, Health::Ok).contains('✔'));
+        assert!(health_cell(style, Health::Modified).contains('✎'));
+        assert!(health_cell(style, Health::Behind).contains('↓'));
+        assert!(health_cell(style, Health::Pinned).contains('⚑'));
+        assert!(health_cell(style, Health::Missing).contains('✖'));
+        assert!(health_cell(style, Health::Unmanaged).contains('?'));
+        assert!(health_cell(style, Health::Detached).contains('⤹'));
+        assert!(health_cell(style, Health::Skipped).contains('○'));
+    }
+
+    #[test]
+    fn health_cell_omits_symbols_when_style_plain() {
+        let style = Style::plain();
+        assert!(!health_cell(style, Health::Ok).contains('✔'));
+        assert_eq!(health_cell(style, Health::Ok), "ok");
+        assert_eq!(health_cell(style, Health::Modified), "modified");
+    }
 }

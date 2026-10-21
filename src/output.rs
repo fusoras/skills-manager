@@ -35,10 +35,21 @@ impl Style {
         }
     }
 
+    /// Whether colors and ANSI styling are enabled.
+    pub fn is_enabled(self) -> bool {
+        self.enabled
+    }
+
     /// Colors off, for tests and non-tty writers.
     #[cfg(test)]
     pub fn plain() -> Self {
         Self { enabled: false }
+    }
+
+    /// Colors on, for tests.
+    #[cfg(test)]
+    pub fn colored() -> Self {
+        Self { enabled: true }
     }
 
     /// Wrap `text` in `code` .. `RESET` when colors are enabled.

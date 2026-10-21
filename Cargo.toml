@@ -16,6 +16,7 @@ anyhow = "1"
 blake3 = "1.8.7"
 clap = { version = "4", features = ["derive"] }
 dirs = "7"
+inquire = "0.9.4"
 serde = { version = "1", features = ["derive"] }
 terminal_size = "0.4"
 toml = "1"

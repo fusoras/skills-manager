@@ -46,12 +46,12 @@ For complete details on store normalization, default targets, agent overrides, a
 | `skm pack show <name>`                                                    | Details of a pack (skills, description)                    |
 | `skm pack edit <name> [--add <skill>...] [--remove <skill>...]`           | Open pack in $EDITOR or add/remove skills directly via CLI |
 | `skm pack status`                                                         | State of packs installed in this project                   |
-| `skm pack add <pack>... [agent flags] [--pin] [--force] [--dry-run]`      | Install packs into this project                            |
+| `skm pack add [<pack>...] [-i] [agent flags] [--pin] [--force] [--dry-run]`| Install packs into this project (interactive picker if empty) |
 | `skm pack remove <pack>... [agent flags] [--force] [--dry-run]`           | Remove packs with reference counting                       |
 | `skm projects`                                                            | List all managed projects on this machine                  |
-| `skm add <skill>... [--pack] [agent flags] [--pin] [--force] [--dry-run]` | Copy skills or packs into project agent targets            |
+| `skm add [<skill>...] [-i] [--pack] [agent flags] [--pin] [--force] [--dry-run]` | Copy skills into targets (interactive picker if empty)    |
 | `skm remove <skill>... [--pack] [agent flags] [--force] [--dry-run]`      | Delete copies or unlink packs with reference counting      |
-| `skm status [--packs]`                                                    | Health of skills or packs (read only)                      |
+| `skm status [-p\|--project] [-g\|--global] [--packs]`                      | Unified visual status of project and global skills         |
 | `skm sync [--force] [--dry-run]`                                          | Reconcile the project with the store                       |
 
 `skm list` prints the skills available in the store. Passing `--desc` (or `-d` / `--description`) includes the skill description dimmed in gray, truncated dynamically with an ellipsis (`...`) to adapt to the terminal width without hiding the first word.
@@ -89,6 +89,18 @@ and for frontmatter names that do not match their directory.
 directories, and copies the whole skill directory as real files through a temporary
 directory next to the destination plus an atomic `rename`, preserving
 permissions.
+
+When run without arguments (e.g. `skm add`) in an interactive terminal or with the `-i` / `--interactive` flag, `skm` launches a lightweight terminal multi-select picker allowing you to toggle skills with `<space>` and confirm with `<enter>`:
+
+```text
+? Select skills to install:
+[x] git-commit          Write conventional commit messages
+[ ] rust-best-practices Idiomatic Rust guide
+[x] strict-testing      Red-green verification
+> Press <space> to toggle, <enter> to confirm
+```
+
+(The same interactive selection is available for packs with `skm pack add -i` or `skm add --pack -i`).
 
 Targets are chosen via agent flags:
 
@@ -174,20 +186,24 @@ For the complete guide on pack definitions, CLI editing, multi-target installati
 
 ### Checking
 
-`skm status` is read only and prints one row per recorded skill in `projects.toml`
-plus one row per unmanaged directory found in known target folders. States, from
-the most to the least urgent:
+`skm status` is read only and displays a **Unified Visual Status View** of skills across both the current project and global agent environments (`~/.config/opencode/skills`, `~/.gemini/skills`, etc.):
 
-| State       | Meaning                                                               |
-| ----------- | --------------------------------------------------------------------- |
-| `missing`   | recorded in central registry, but the directory is gone               |
-| `detached`  | a local fork: `skm` never touches it                                  |
-| `modified`  | the copy differs from `written_hash` (local edits)                    |
-| `behind`    | the store content differs from `source_hash` (an update is available) |
-| `pinned`    | in sync and pinned                                                    |
-| `ok`        | in sync                                                               |
-| `skipped`   | no store is registered, so the copy cannot be compared with one       |
-| `unmanaged` | a directory in a target that central registry does not know           |
+- Run `skm status` to view both the current project and global agent sections.
+- Pass `-p` / `--project` to filter to project skills only.
+- Pass `-g` / `--global` to filter to global agent skills only.
+
+In color-capable terminals, each row features high-visibility status icons:
+
+| Icon & State | Meaning                                                               |
+| ------------ | --------------------------------------------------------------------- |
+| `✖ missing`   | recorded in central registry, but the directory is gone               |
+| `⤹ detached`  | a local fork: `skm` never touches it                                  |
+| `✎ modified`  | the copy differs from `written_hash` (local edits)                    |
+| `↓ behind`    | the store content differs from `source_hash` (an update is available) |
+| `⚑ pinned`    | in sync and pinned                                                    |
+| `✔ ok`        | in sync                                                               |
+| `○ skipped`   | no store is registered, so the copy cannot be compared with one       |
+| `? unmanaged` | a directory in a target that central registry does not know           |
 
 A detached fork is never compared with the store again, and without a registered
 store the comparison is `skipped (no store registered)` while the local verdicts

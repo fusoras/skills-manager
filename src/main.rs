@@ -11,6 +11,7 @@ mod doc;
 mod fsops;
 mod hash;
 mod install;
+mod interactive;
 mod output;
 mod pack;
 mod project;
