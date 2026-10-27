@@ -42,6 +42,82 @@ fn page_size_from(count: usize, term_height: Option<usize>) -> usize {
     }
 }
 
+/// An item displayed in the interactive multi-select installer prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallChoice {
+    pub item: crate::install::InstallItem,
+    pub display: String,
+}
+
+impl std::fmt::Display for InstallChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display)
+    }
+}
+
+/// Prompt the user to interactively select skills and packs from the store.
+pub fn select_items(config: &Config) -> Result<Vec<crate::install::InstallItem>> {
+    let report = store::scan(config.store_path()?)?;
+    if !report.ready {
+        bail!("{}", report.warnings.join("; "));
+    }
+    let store_root = std::path::Path::new(config.store_path()?);
+    let packs = pack::list(store_root).unwrap_or_default();
+
+    if report.skills.is_empty() && packs.is_empty() {
+        bail!("no skills or packs found in the store; run `skm store scan` to inspect your store");
+    }
+
+    let mut choices = Vec::new();
+    let has_packs = !packs.is_empty();
+
+    // Packs first
+    for p in packs {
+        let skills_summary = if p.skills.is_empty() {
+            "empty".to_owned()
+        } else {
+            p.skills.join(", ")
+        };
+        choices.push(InstallChoice {
+            item: crate::install::InstallItem::Pack(p.name.clone()),
+            display: format!("[pack]  {:<16} ({})", p.name, skills_summary),
+        });
+    }
+
+    // Skills
+    for s in report.skills {
+        let display = if has_packs {
+            format!("[skill] {}", s.name)
+        } else {
+            s.name.clone()
+        };
+        choices.push(InstallChoice {
+            item: crate::install::InstallItem::Skill(s.name),
+            display,
+        });
+    }
+
+    let count = choices.len();
+    let prompt_msg = if has_packs {
+        "Select skills or packs to install:"
+    } else {
+        "Select skills to install:"
+    };
+
+    let prompt = MultiSelect::new(prompt_msg, choices)
+        .with_render_config(render_config())
+        .with_page_size(page_size_for(count))
+        .with_help_message(HELP_MESSAGE);
+
+    match prompt.prompt() {
+        Ok(selected) => Ok(selected.into_iter().map(|c| c.item).collect()),
+        Err(
+            inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted,
+        ) => Ok(Vec::new()),
+        Err(err) => Err(anyhow::anyhow!("interactive prompt error: {err}")),
+    }
+}
+
 /// Prompt the user to interactively select skills from the store.
 pub fn select_skills(config: &Config) -> Result<Vec<String>> {
     let report = store::scan(config.store_path()?)?;
@@ -215,6 +291,18 @@ mod tests {
             global_choices
                 .iter()
                 .any(|c| c.name == "antigravity" && c.target == "~/.gemini/skills")
+        );
+    }
+
+    #[test]
+    fn install_choice_formats_cleanly() {
+        let choice = InstallChoice {
+            item: crate::install::InstallItem::Pack("frontend".to_owned()),
+            display: "[pack]  frontend         (alpha, beta)".to_owned(),
+        };
+        assert_eq!(
+            format!("{choice}"),
+            "[pack]  frontend         (alpha, beta)"
         );
     }
 }

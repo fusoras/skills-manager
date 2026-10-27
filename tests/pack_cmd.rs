@@ -392,3 +392,106 @@ fn pack_add_without_arguments_in_non_interactive_terminal_fails() {
         "{stderr}"
     );
 }
+
+#[test]
+fn pack_add_without_pack_flag_auto_detects_pack() {
+    let (sandbox, _store, project) = ready();
+
+    // Install pack using plain `skm add frontend` without any --pack flag!
+    let output = stdout_of(sandbox.skm_in(&project).args(["add", "frontend"]));
+    assert!(output.contains("Installed alpha -> .agents/skills/alpha"));
+    assert!(output.contains("Installed beta -> .agents/skills/beta"));
+
+    assert!(project.join(".agents/skills/alpha/SKILL.md").exists());
+    assert!(project.join(".agents/skills/beta/SKILL.md").exists());
+    assert_clean_project(&project);
+
+    // Verify pack status reflects frontend is installed
+    let status_out = stdout_of(sandbox.skm_in(&project).args(["pack", "status"]));
+    assert_eq!(
+        table_cells(&status_out),
+        rows(&[
+            &["PACK", "SKILLS", "STATE"],
+            &["frontend", "2 skills", "installed"],
+        ])
+    );
+}
+
+#[test]
+fn add_mixed_pack_and_skill_without_flags() {
+    let (sandbox, _store, project) = ready();
+
+    // frontend is a pack (alpha, beta), gamma is a skill
+    let output = stdout_of(sandbox.skm_in(&project).args(["add", "frontend", "gamma"]));
+    assert!(output.contains("Installed alpha -> .agents/skills/alpha"));
+    assert!(output.contains("Installed beta -> .agents/skills/beta"));
+    assert!(output.contains("Installed gamma -> .agents/skills/gamma"));
+
+    let status_out = stdout_of(sandbox.skm_in(&project).args(["pack", "status"]));
+    assert_eq!(
+        table_cells(&status_out),
+        rows(&[
+            &["PACK", "SKILLS", "STATE"],
+            &["frontend", "2 skills", "installed"],
+        ])
+    );
+
+    let ind_status = stdout_of(sandbox.skm_in(&project).args(["status"]));
+    assert_eq!(
+        table_cells(&ind_status),
+        rows(&[
+            &["SKILL", "TARGET", "STATE"],
+            &["alpha", ".agents/skills", "ok"],
+            &["beta", ".agents/skills", "ok"],
+            &["gamma", ".agents/skills", "ok"],
+        ])
+    );
+}
+
+#[test]
+fn add_ambiguous_name_reports_error() {
+    let (sandbox, store, project) = ready();
+    // Create both a skill named "shared" and a pack named "shared"
+    sandbox.skill(&store, "shared", Some("shared"));
+    write(
+        &store.join("packs/shared.toml"),
+        r#"
+name = "shared"
+skills = ["alpha"]
+"#,
+    );
+
+    let (stdout, stderr) = failure_of(sandbox.skm_in(&project).args(["add", "shared"]));
+    assert!(stdout.is_empty());
+    assert!(
+        stderr.contains("'shared' matches both a skill and a pack in the store"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("specify '--pack' or '--skill'"), "{stderr}");
+}
+
+#[test]
+fn add_ambiguous_with_skill_or_pack_flag_disambiguates() {
+    let (sandbox, store, project) = ready();
+    sandbox.skill(&store, "shared", Some("shared"));
+    write(
+        &store.join("packs/shared.toml"),
+        r#"
+name = "shared"
+skills = ["alpha"]
+"#,
+    );
+
+    // 1. With --skill: installs only skill shared
+    let out_skill = stdout_of(sandbox.skm_in(&project).args(["add", "shared", "--skill"]));
+    assert!(out_skill.contains("Installed shared -> .agents/skills/shared"));
+    assert!(!project.join(".agents/skills/alpha").exists());
+
+    // Clean up for next check
+    stdout_of(sandbox.skm_in(&project).args(["remove", "shared"]));
+
+    // 2. With --pack: installs pack shared (member alpha)
+    let out_pack = stdout_of(sandbox.skm_in(&project).args(["add", "shared", "--pack"]));
+    assert!(out_pack.contains("Installed alpha -> .agents/skills/alpha"));
+    assert!(!project.join(".agents/skills/shared").exists());
+}

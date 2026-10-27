@@ -308,6 +308,14 @@ impl Action {
     }
 }
 
+/// An item requested for installation: explicitly a skill, a pack, or auto-detected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallItem {
+    Skill(String),
+    Pack(String),
+    Auto(String),
+}
+
 /// Options of `skm add`.
 #[derive(Debug, Clone, Default)]
 pub struct AddOptions {
@@ -317,8 +325,6 @@ pub struct AddOptions {
     pub pin: bool,
     /// Overwrite local modifications.
     pub force: bool,
-    /// Whether `names` are pack names.
-    pub pack: bool,
 }
 
 /// One skill about to be installed.
@@ -361,7 +367,7 @@ pub struct AddBatchPlan {
 pub fn plan_add(
     config: &Config,
     project: &Project,
-    names: &[String],
+    items: &[InstallItem],
     options: &AddOptions,
 ) -> Result<AddBatchPlan> {
     let targets = if options.targets.is_empty() {
@@ -380,29 +386,67 @@ pub fn plan_add(
 
     let mut requests: Vec<Request> = Vec::new();
     let mut recorded_packs: Vec<String> = Vec::new();
+    let store_root = Path::new(config.store_path()?);
+    let report = store::scan(config.store_path()?)?;
+    if !report.ready {
+        bail!("{}", report.warnings.join("; "));
+    }
 
-    if options.pack {
-        let store_root = Path::new(config.store_path()?);
-        for pack_name in names {
-            let pack_def = pack::load(store_root, pack_name)?;
-            if !recorded_packs.contains(&pack_def.name) {
-                recorded_packs.push(pack_def.name.clone());
+    for item in items {
+        match item {
+            InstallItem::Pack(pack_name) => {
+                let pack_def = pack::load(store_root, pack_name)?;
+                if !recorded_packs.contains(&pack_def.name) {
+                    recorded_packs.push(pack_def.name.clone());
+                }
+                for skill_name in pack_def.skills {
+                    requests.push(Request {
+                        skill: skill_name,
+                        pack: Some(pack_def.name.clone()),
+                        direct: false,
+                    });
+                }
             }
-            for skill_name in pack_def.skills {
+            InstallItem::Skill(skill_name) => {
                 requests.push(Request {
-                    skill: skill_name,
-                    pack: Some(pack_def.name.clone()),
-                    direct: false,
+                    skill: skill_name.clone(),
+                    pack: None,
+                    direct: true,
                 });
             }
-        }
-    } else {
-        for name in names {
-            requests.push(Request {
-                skill: name.clone(),
-                pack: None,
-                direct: true,
-            });
+            InstallItem::Auto(name) => {
+                let is_pack = pack::find_pack_file(store_root, name)?.is_some()
+                    || pack::pack_file(store_root, name).is_file();
+                let is_skill = report.skills.iter().any(|s| s.name == *name);
+
+                if is_pack && is_skill {
+                    bail!(
+                        "'{name}' matches both a skill and a pack in the store; specify '--pack' or '--skill' to disambiguate"
+                    );
+                } else if is_pack {
+                    let pack_def = pack::load(store_root, name)?;
+                    if !recorded_packs.contains(&pack_def.name) {
+                        recorded_packs.push(pack_def.name.clone());
+                    }
+                    for skill_name in pack_def.skills {
+                        requests.push(Request {
+                            skill: skill_name,
+                            pack: Some(pack_def.name.clone()),
+                            direct: false,
+                        });
+                    }
+                } else if is_skill {
+                    requests.push(Request {
+                        skill: name.clone(),
+                        pack: None,
+                        direct: true,
+                    });
+                } else {
+                    bail!(
+                        "skill '{name}' not found in the store; run `skm list` to see the available skills"
+                    );
+                }
+            }
         }
     }
 

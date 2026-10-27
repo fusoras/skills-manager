@@ -31,6 +31,9 @@ pub enum Commands {
         /// List packs instead of individual skills
         #[arg(long)]
         packs: bool,
+        /// List skills only (omit packs table)
+        #[arg(long)]
+        skills: bool,
         /// Show skill descriptions
         #[arg(short, long, alias = "desc")]
         description: bool,
@@ -46,6 +49,9 @@ pub enum Commands {
         /// Install a pack of skills instead of individual skills
         #[arg(long, alias = "packs")]
         pack: bool,
+        /// Install individual skills (useful to disambiguate if a pack shares the same name)
+        #[arg(long)]
+        skill: bool,
         /// Install into global agent directories instead of project
         #[arg(short = 'g', long)]
         global: bool,
@@ -380,6 +386,7 @@ mod tests {
             parse(&["list"]).command,
             Commands::List {
                 packs: false,
+                skills: false,
                 description: false,
             }
         ));
@@ -387,6 +394,15 @@ mod tests {
             parse(&["list", "--packs"]).command,
             Commands::List {
                 packs: true,
+                skills: false,
+                description: false,
+            }
+        ));
+        assert!(matches!(
+            parse(&["list", "--skills"]).command,
+            Commands::List {
+                packs: false,
+                skills: true,
                 description: false,
             }
         ));
@@ -394,6 +410,7 @@ mod tests {
             parse(&["list", "--desc"]).command,
             Commands::List {
                 packs: false,
+                skills: false,
                 description: true,
             }
         ));
@@ -401,6 +418,7 @@ mod tests {
             parse(&["list", "--description"]).command,
             Commands::List {
                 packs: false,
+                skills: false,
                 description: true,
             }
         ));
@@ -408,6 +426,7 @@ mod tests {
             parse(&["list", "-d"]).command,
             Commands::List {
                 packs: false,
+                skills: false,
                 description: true,
             }
         ));
@@ -448,6 +467,7 @@ mod tests {
             force,
             interactive,
             dry_run,
+            skill,
         } = parse(&["add", "alpha", "beta"]).command
         else {
             panic!("expected `add`");
@@ -455,6 +475,7 @@ mod tests {
         assert_eq!(skills, ["alpha", "beta"]);
         assert!(
             !pack
+                && !skill
                 && !agent
                 && !antigravity
                 && !opencode
@@ -506,6 +527,11 @@ mod tests {
         assert!(pack && agent && opencode && claude && codex && pi && interactive);
         assert_eq!(dir.as_deref(), Some("custom/skills"));
         assert!(pin && force && dry_run);
+
+        let Commands::Add { skill, .. } = parse(&["add", "alpha", "--skill"]).command else {
+            panic!("expected `add`");
+        };
+        assert!(skill);
     }
 
     #[test]

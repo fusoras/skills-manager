@@ -4,7 +4,7 @@ mod common;
 
 use std::fs;
 
-use common::{Sandbox, failure_of, rows, stdout_of, table_cells};
+use common::{Sandbox, failure_of, rows, stdout_of, table_cells, write};
 
 #[test]
 fn list_shows_the_skills_of_the_store() {
@@ -146,4 +146,91 @@ fn list_fails_when_the_registered_store_is_gone() {
         stderr,
         format!("error: path does not exist: {}\n", store.display())
     );
+}
+
+#[test]
+fn list_shows_both_skills_and_packs_when_packs_exist() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.path("store");
+    sandbox.skill(&store, "alpha", Some("alpha"));
+    sandbox.skill(&store, "beta", Some("beta"));
+
+    let packs_dir = store.join("packs");
+    fs::create_dir_all(&packs_dir).expect("create packs dir");
+    write(
+        &packs_dir.join("bundle.toml"),
+        r#"
+name = "bundle"
+description = "A bundle of skills"
+skills = ["alpha", "beta"]
+"#,
+    );
+    sandbox.register_store(&store);
+
+    let listed = stdout_of(sandbox.skm().args(["list"]));
+    assert_eq!(
+        table_cells(&listed),
+        rows(&[
+            &["SKILL"],
+            &["alpha"],
+            &["beta"],
+            &[],
+            &["PACK", "SKILLS"],
+            &["bundle", "alpha, beta"],
+        ])
+    );
+}
+
+#[test]
+fn list_shows_descriptions_for_both_skills_and_packs_with_desc_flag() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.path("store");
+    sandbox.skill_with_desc(&store, "alpha", "alpha", "First skill");
+    sandbox.skill_with_desc(&store, "beta", "beta", "Second skill");
+
+    let packs_dir = store.join("packs");
+    fs::create_dir_all(&packs_dir).expect("create packs dir");
+    write(
+        &packs_dir.join("bundle.toml"),
+        r#"
+name = "bundle"
+description = "A bundle of skills"
+skills = ["alpha", "beta"]
+"#,
+    );
+    sandbox.register_store(&store);
+
+    let listed = stdout_of(sandbox.skm().args(["list", "--desc"]));
+    assert_eq!(
+        table_cells(&listed),
+        rows(&[
+            &["SKILL", "DESCRIPTION"],
+            &["alpha", "First skill"],
+            &["beta", "Second skill"],
+            &[],
+            &["PACK", "SKILLS", "DESCRIPTION"],
+            &["bundle", "alpha, beta", "A bundle of skills"],
+        ])
+    );
+}
+
+#[test]
+fn list_skills_flag_shows_only_skills() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.path("store");
+    sandbox.skill(&store, "alpha", Some("alpha"));
+
+    let packs_dir = store.join("packs");
+    fs::create_dir_all(&packs_dir).expect("create packs dir");
+    write(
+        &packs_dir.join("bundle.toml"),
+        r#"
+name = "bundle"
+skills = ["alpha"]
+"#,
+    );
+    sandbox.register_store(&store);
+
+    let listed = stdout_of(sandbox.skm().args(["list", "--skills"]));
+    assert_eq!(table_cells(&listed), rows(&[&["SKILL"], &["alpha"]]));
 }

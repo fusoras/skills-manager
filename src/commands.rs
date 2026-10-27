@@ -43,17 +43,16 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Config { action } => config_cmd(out, action),
         Commands::Store { action } => store_cmd(out, action),
-        Commands::List { packs, description } => {
-            if packs {
-                list_packs(out)
-            } else {
-                list_skills(out, description)
-            }
-        }
+        Commands::List {
+            packs,
+            skills,
+            description,
+        } => list_cmd(out, packs, skills, description),
         Commands::Add {
             skills,
             interactive,
             pack,
+            skill,
             global,
             agent,
             antigravity,
@@ -70,7 +69,7 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
             let config = config::load()?;
             let is_interactive =
                 interactive || (skills.is_empty() && std::io::stdin().is_terminal());
-            let skills = if skills.is_empty() {
+            let items: Vec<install::InstallItem> = if skills.is_empty() {
                 if !interactive && !std::io::stdin().is_terminal() {
                     bail!(
                         "skill argument required when running non-interactively; use -i or pass skill names"
@@ -78,8 +77,16 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
                 }
                 let chosen = if pack {
                     crate::interactive::select_packs(&config)?
-                } else {
+                        .into_iter()
+                        .map(install::InstallItem::Pack)
+                        .collect()
+                } else if skill {
                     crate::interactive::select_skills(&config)?
+                        .into_iter()
+                        .map(install::InstallItem::Skill)
+                        .collect()
+                } else {
+                    crate::interactive::select_items(&config)?
                 };
                 if chosen.is_empty() {
                     out.line("No skills selected.")?;
@@ -88,6 +95,17 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
                 chosen
             } else {
                 skills
+                    .into_iter()
+                    .map(|name| {
+                        if pack {
+                            install::InstallItem::Pack(name)
+                        } else if skill {
+                            install::InstallItem::Skill(name)
+                        } else {
+                            install::InstallItem::Auto(name)
+                        }
+                    })
+                    .collect()
             };
 
             let has_agent_flags = agent
@@ -137,12 +155,11 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
             };
             add_skills(
                 out,
-                &skills,
+                &items,
                 install::AddOptions {
                     targets,
                     pin,
                     force,
-                    pack,
                 },
                 global,
                 dry_run,
@@ -297,14 +314,15 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
                     dir.as_deref(),
                 )?
             };
+            let items: Vec<install::InstallItem> =
+                packs.into_iter().map(install::InstallItem::Pack).collect();
             add_skills(
                 out,
-                &packs,
+                &items,
                 install::AddOptions {
                     targets,
                     pin,
                     force,
-                    pack: true,
                 },
                 global,
                 dry_run,
@@ -357,7 +375,7 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
 /// `skm add`: plan every skill, then copy them and record them.
 fn add_skills(
     out: &mut Printer,
-    names: &[String],
+    items: &[install::InstallItem],
     options: install::AddOptions,
     global: bool,
     dry_run: bool,
@@ -368,7 +386,7 @@ fn add_skills(
     } else {
         Project::open()?
     };
-    let batch = install::plan_add(&config, &project, names, &options)?;
+    let batch = install::plan_add(&config, &project, items, &options)?;
 
     if !dry_run {
         install::apply_add(&mut project, &batch)?;
@@ -764,6 +782,51 @@ fn render_report(out: &mut Printer, report: &ScanReport) -> Result<()> {
         for warning in &report.warnings {
             out.line(&format!("    {} {warning}", style.warn("!")))?;
         }
+    }
+    Ok(())
+}
+
+fn list_cmd(out: &mut Printer, packs_only: bool, skills_only: bool, show_desc: bool) -> Result<()> {
+    if packs_only {
+        return list_packs(out);
+    }
+    if skills_only {
+        return list_skills(out, show_desc);
+    }
+
+    list_skills(out, show_desc)?;
+
+    let config = config::load()?;
+    let store_root = std::path::Path::new(config.store_path()?);
+    let packs = pack::list(store_root).unwrap_or_default();
+    if !packs.is_empty() {
+        out.line("")?;
+        render_packs_table(out, &packs, show_desc)?;
+    }
+
+    Ok(())
+}
+
+fn render_packs_table(out: &mut Printer, packs: &[pack::Pack], show_desc: bool) -> Result<()> {
+    let style = out.style();
+    if show_desc {
+        let rows: Vec<Vec<String>> = packs
+            .iter()
+            .map(|p| {
+                vec![
+                    style.ident(&p.name),
+                    p.skills.join(", "),
+                    p.description.clone().unwrap_or_else(|| "-".to_owned()),
+                ]
+            })
+            .collect();
+        out.table(&["PACK", "SKILLS", "DESCRIPTION"], &rows)?;
+    } else {
+        let rows: Vec<Vec<String>> = packs
+            .iter()
+            .map(|p| vec![style.ident(&p.name), p.skills.join(", ")])
+            .collect();
+        out.table(&["PACK", "SKILLS"], &rows)?;
     }
     Ok(())
 }
