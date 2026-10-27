@@ -19,8 +19,18 @@ pub fn root() -> Result<PathBuf> {
 /// [`root`] for an explicit starting directory.
 pub fn root_from(start: &Path) -> PathBuf {
     let registry = Registry::load().unwrap_or_default();
+    root_from_with(start, &registry)
+}
+
+/// [`root`] for an explicit starting directory and registry.
+pub fn root_from_with(start: &Path, registry: &Registry) -> PathBuf {
     for candidate in start.ancestors() {
-        if candidate.join(".git").exists() || registry.get_project(candidate).is_some() {
+        if candidate.join(".git").exists() {
+            return candidate.to_path_buf();
+        }
+        if (start == candidate || (candidate != Path::new("/") && candidate != Path::new("/tmp")))
+            && registry.get_project(candidate).is_some()
+        {
             return candidate.to_path_buf();
         }
     }
