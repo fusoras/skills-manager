@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::config::Config;
 use crate::fsops;
@@ -41,6 +41,8 @@ pub enum SyncAction {
     Pinned,
     /// A locally modified copy: detached in the registry, the fork kept.
     Detached,
+    /// The local copy was pushed to the store.
+    Pushed,
     /// The store cannot provide the skill.
     Skipped,
     /// A directory in a target that nothing declares.
@@ -49,7 +51,7 @@ pub enum SyncAction {
 
 impl SyncAction {
     /// Every action, in the order the summary counts them.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Ok,
         Self::Updated,
         Self::Installed,
@@ -58,6 +60,7 @@ impl SyncAction {
         Self::Replaced,
         Self::Pinned,
         Self::Detached,
+        Self::Pushed,
         Self::Skipped,
         Self::Unmanaged,
     ];
@@ -73,6 +76,7 @@ impl SyncAction {
             Self::Replaced => "replaced",
             Self::Pinned => "pinned",
             Self::Detached => "detached",
+            Self::Pushed => "pushed",
             Self::Skipped => "skipped",
             Self::Unmanaged => "unmanaged",
         }
@@ -90,7 +94,8 @@ impl SyncAction {
             | Self::Installed
             | Self::Restored
             | Self::Adopted
-            | Self::Pinned => None,
+            | Self::Pinned
+            | Self::Pushed => None,
         }
     }
 
@@ -110,6 +115,8 @@ pub enum SkipReason {
     NoStore,
     /// The store cannot provide the skill.
     Unavailable,
+    /// The local copy is missing on disk.
+    LocalMissing,
 }
 
 impl SkipReason {
@@ -118,8 +125,20 @@ impl SkipReason {
         match self {
             Self::NoStore => "no store registered",
             Self::Unavailable => "store unavailable",
+            Self::LocalMissing => "local copy missing",
         }
     }
+}
+
+/// Options of `skm sync`.
+#[derive(Debug, Clone, Default)]
+pub struct SyncOptions {
+    /// Overwrite locally modified copies (or diverged store if pushing).
+    pub force: bool,
+    /// Push local copies back to the store.
+    pub to_store: bool,
+    /// Specific skills to sync (all if empty).
+    pub skills: Vec<String>,
 }
 
 /// One reconciliation step.
@@ -185,7 +204,11 @@ struct Source {
 }
 
 /// Plan the reconciliation of every recorded skill, validating before any write.
-pub fn plan_sync(config: &Config, project: &Project, force: bool) -> Result<Vec<SyncPlan>> {
+pub fn plan_sync(
+    config: &Config,
+    project: &Project,
+    options: &SyncOptions,
+) -> Result<Vec<SyncPlan>> {
     let root = project.root();
     let default_target = if project.is_global {
         config.default_global_target.clone()
@@ -193,9 +216,34 @@ pub fn plan_sync(config: &Config, project: &Project, force: bool) -> Result<Vec<
         resolve_target(config, project, None, None)?
     };
     let now = registry::now_epoch();
+
+    if !options.skills.is_empty() {
+        for req in &options.skills {
+            let in_records = project.record.skills.iter().any(|s| &s.name == req);
+            let in_targets = targets::known_targets(project, &default_target)
+                .iter()
+                .any(|t| installed_dir(root, t, req).is_dir());
+            if !in_records && !in_targets {
+                let scope = if project.is_global {
+                    "in global targets"
+                } else {
+                    "in this project"
+                };
+                bail!("skill '{req}' not found {scope}; run `skm list` to see available skills");
+            }
+        }
+    }
+
+    if options.to_store {
+        return plan_sync_to_store(config, project, options, &default_target, now);
+    }
+
     let mut plans: Vec<SyncPlan> = Vec::new();
 
     for entry in &project.record.skills {
+        if !options.skills.is_empty() && !options.skills.contains(&entry.name) {
+            continue;
+        }
         if entry.detached {
             continue;
         }
@@ -230,7 +278,7 @@ pub fn plan_sync(config: &Config, project: &Project, force: bool) -> Result<Vec<
             None if pinned => SyncAction::Restored,
             None => SyncAction::Installed,
             Some(curr) => {
-                if curr != entry.written_hash && !force {
+                if curr != entry.written_hash && !options.force {
                     SyncAction::Detached
                 } else if curr != entry.written_hash {
                     SyncAction::Replaced
@@ -286,6 +334,9 @@ pub fn plan_sync(config: &Config, project: &Project, force: bool) -> Result<Vec<
             continue;
         }
         for name in targets::subdirectories(&dir)? {
+            if !options.skills.is_empty() && !options.skills.contains(&name) {
+                continue;
+            }
             let covered = known.iter().any(|(known_name, known_target)| {
                 *known_name == name.as_str() && *known_target == target
             }) || plans
@@ -329,6 +380,220 @@ pub fn plan_sync(config: &Config, project: &Project, force: bool) -> Result<Vec<
     Ok(plans)
 }
 
+/// Plan pushing local skills back to the store.
+fn plan_sync_to_store(
+    config: &Config,
+    project: &Project,
+    options: &SyncOptions,
+    default_target: &str,
+    now: i64,
+) -> Result<Vec<SyncPlan>> {
+    let root = project.root();
+    let mut plans: Vec<SyncPlan> = Vec::new();
+
+    let Some(path_as_written) = config.store.as_deref() else {
+        for entry in &project.record.skills {
+            if !options.skills.is_empty() && !options.skills.contains(&entry.name) {
+                continue;
+            }
+            let mut plan = SyncPlan::new(&entry.name, &entry.target, root, SyncAction::Skipped);
+            plan.skip = Some(SkipReason::NoStore);
+            plans.push(plan);
+        }
+        return Ok(plans);
+    };
+
+    let store_root = store::expand_tilde(path_as_written);
+
+    for entry in &project.record.skills {
+        if !options.skills.is_empty() && !options.skills.contains(&entry.name) {
+            continue;
+        }
+
+        let name = &entry.name;
+        let target = &entry.target;
+        let dest_dir = installed_dir(root, target, name);
+
+        let mut plan = SyncPlan::new(name, target, root, SyncAction::Skipped);
+
+        if !dest_dir.is_dir() {
+            plan.skip = Some(SkipReason::LocalMissing);
+            plans.push(plan);
+            continue;
+        }
+
+        if !skill::is_skill_dir(&dest_dir) {
+            bail!(
+                "cannot push '{}' in {}: directory does not contain SKILL.md",
+                name,
+                plan.dest_rel
+            );
+        }
+
+        let curr_hash = hash::tree_hash(&dest_dir)?;
+
+        let source = find_source(config, name, Some(entry))?;
+        let (source_dir, source_rel, store_hash) = match source {
+            Some(src) => {
+                let h = if src.dir.is_dir() {
+                    Some(hash::tree_hash(&src.dir)?)
+                } else {
+                    None
+                };
+                (src.dir, src.rel, h)
+            }
+            None => {
+                let rel = if !entry.source_rel.is_empty() {
+                    entry.source_rel.clone()
+                } else {
+                    let layout = store::detect_layout(&store_root);
+                    match layout {
+                        store::Layout::Catalog => format!("skills/{name}"),
+                        store::Layout::Flat => name.to_owned(),
+                    }
+                };
+                let dir = store_root.join(&rel);
+                let h = if dir.is_dir() {
+                    Some(hash::tree_hash(&dir)?)
+                } else {
+                    None
+                };
+                (dir, rel, h)
+            }
+        };
+
+        plan.source_rel = source_rel.clone();
+
+        if store_hash.as_deref() == Some(&curr_hash) {
+            plan.action = SyncAction::Ok;
+            if entry.detached || entry.written_hash != curr_hash || entry.source_hash != curr_hash {
+                plan.entry = Some(SkillState {
+                    name: name.clone(),
+                    source_rel: source_rel.clone(),
+                    target: target.clone(),
+                    written_hash: curr_hash.clone(),
+                    source_hash: curr_hash,
+                    pinned: entry.pinned,
+                    detached: false,
+                    detached_at: None,
+                    installed_at: if entry.installed_at == 0 {
+                        now
+                    } else {
+                        entry.installed_at
+                    },
+                    packs: entry.packs.clone(),
+                    direct: entry.direct,
+                    ..SkillState::default()
+                });
+            }
+        } else {
+            if let Some(s_hash) = store_hash.as_deref()
+                && !entry.source_hash.is_empty()
+                && s_hash != entry.source_hash
+                && curr_hash != entry.written_hash
+                && !options.force
+            {
+                bail!(
+                    "store copy of '{name}' has changed since it was installed; pass --force to overwrite the store"
+                );
+            }
+
+            plan.action = SyncAction::Pushed;
+            plan.source_dir = Some(source_dir);
+            plan.entry = Some(SkillState {
+                name: name.clone(),
+                source_rel: source_rel.clone(),
+                target: target.clone(),
+                written_hash: curr_hash.clone(),
+                source_hash: curr_hash,
+                pinned: entry.pinned,
+                detached: false,
+                detached_at: None,
+                installed_at: if entry.installed_at == 0 {
+                    now
+                } else {
+                    entry.installed_at
+                },
+                packs: entry.packs.clone(),
+                direct: entry.direct,
+                ..SkillState::default()
+            });
+        }
+
+        plans.push(plan);
+    }
+
+    if !options.skills.is_empty() {
+        for req in &options.skills {
+            let already_planned = plans.iter().any(|p| &p.skill == req);
+            if !already_planned {
+                for target in targets::known_targets(project, default_target) {
+                    let dest_dir = installed_dir(root, &target, req);
+                    if dest_dir.is_dir() {
+                        if !skill::is_skill_dir(&dest_dir) {
+                            bail!(
+                                "cannot push '{req}' in {target}/{req}: directory does not contain SKILL.md"
+                            );
+                        }
+                        let curr_hash = hash::tree_hash(&dest_dir)?;
+                        let layout = store::detect_layout(&store_root);
+                        let source_rel = match layout {
+                            store::Layout::Catalog => format!("skills/{req}"),
+                            store::Layout::Flat => req.to_owned(),
+                        };
+                        let source_dir = store_root.join(&source_rel);
+
+                        let mut plan = SyncPlan::new(req, &target, root, SyncAction::Pushed);
+                        plan.source_rel = source_rel.clone();
+                        plan.source_dir = Some(source_dir);
+                        plan.entry = Some(SkillState {
+                            name: req.clone(),
+                            source_rel,
+                            target: target.clone(),
+                            written_hash: curr_hash.clone(),
+                            source_hash: curr_hash,
+                            pinned: false,
+                            detached: false,
+                            detached_at: None,
+                            installed_at: now,
+                            direct: true,
+                            ..SkillState::default()
+                        });
+                        plans.push(plan);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut pushed_map: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for plan in &plans {
+        if plan.action == SyncAction::Pushed
+            && let Some(entry) = &plan.entry
+        {
+            if let Some(prev) = pushed_map.get(plan.skill.as_str()) {
+                if *prev != entry.written_hash.as_str() {
+                    bail!(
+                        "conflicting local modifications for skill '{}' across targets; cannot determine which to push",
+                        plan.skill
+                    );
+                }
+            } else {
+                pushed_map.insert(plan.skill.as_str(), entry.written_hash.as_str());
+            }
+        }
+    }
+
+    plans.sort_by(|left, right| {
+        left.skill
+            .cmp(&right.skill)
+            .then_with(|| left.target.cmp(&right.target))
+    });
+
+    Ok(plans)
+}
+
 /// Resolve `name` in the global store: the recorded path first, a scan as fallback.
 fn find_source(config: &Config, name: &str, entry: Option<&SkillState>) -> Result<Option<Source>> {
     let Some(path_as_written) = config.store.as_deref() else {
@@ -358,7 +623,12 @@ fn find_source(config: &Config, name: &str, entry: Option<&SkillState>) -> Resul
 /// Write every planned copy, refresh the state in the central registry.
 pub fn apply_sync(project: &mut Project, plans: &[SyncPlan]) -> Result<()> {
     for plan in plans {
-        if let Some(source) = &plan.source_dir {
+        if plan.action == SyncAction::Pushed {
+            if let Some(store_dest) = &plan.source_dir {
+                fsops::install_tree(&plan.dest_dir, store_dest)
+                    .with_context(|| format!("pushing skill '{}' to store", plan.skill))?;
+            }
+        } else if let Some(source) = &plan.source_dir {
             fsops::install_tree(source, &plan.dest_dir)
                 .with_context(|| format!("installing skill '{}'", plan.skill))?;
         }

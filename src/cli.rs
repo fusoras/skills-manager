@@ -151,7 +151,13 @@ pub enum Commands {
     },
     /// Reconcile the project with the global store
     Sync {
-        /// Overwrite locally modified copies instead of detaching them
+        /// Skill names to sync (syncs all recorded skills when empty)
+        #[arg(value_name = "SKILL")]
+        skills: Vec<String>,
+        /// Push local modifications back to the global store
+        #[arg(long)]
+        to_store: bool,
+        /// Overwrite locally modified copies instead of detaching them (or overwrite diverged store when --to-store)
         #[arg(long)]
         force: bool,
         /// Show what would happen without writing anything
@@ -668,6 +674,8 @@ mod tests {
     #[test]
     fn sync_takes_force_and_dry_run() {
         let Commands::Sync {
+            skills,
+            to_store,
             force,
             dry_run,
             global,
@@ -675,17 +683,28 @@ mod tests {
         else {
             panic!("expected `sync`");
         };
-        assert!(!force && !dry_run && !global);
+        assert!(skills.is_empty() && !to_store && !force && !dry_run && !global);
 
         let Commands::Sync {
+            skills,
+            to_store,
             force,
             dry_run,
             global,
-        } = parse(&["sync", "--force", "--dry-run"]).command
+        } = parse(&[
+            "sync",
+            "alpha",
+            "beta",
+            "--to-store",
+            "--force",
+            "--dry-run",
+        ])
+        .command
         else {
             panic!("expected `sync`");
         };
-        assert!(force && dry_run && !global);
+        assert_eq!(skills, ["alpha", "beta"]);
+        assert!(to_store && force && dry_run && !global);
     }
 
     #[test]

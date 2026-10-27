@@ -433,3 +433,139 @@ fn sync_reports_an_empty_project() {
     assert_clean_project(&project);
     assert_eq!(tree(&project), Vec::<String>::new());
 }
+
+#[test]
+fn sync_to_store_pushes_modified_skill_and_updates_hashes() {
+    let (sandbox, store) = installed();
+    let project = sandbox.project();
+
+    let local_modified = "---\nname: alpha\ndescription: local edits\n---\n\n# Local edits\n";
+    write(&dest(&project).join("SKILL.md"), local_modified);
+
+    let output = stdout_of(sandbox.skm_in(&project).args(["sync", "--to-store"]));
+    assert_eq!(
+        output,
+        lines(&[
+            line("pushed", "alpha", ".agents/skills/alpha", None),
+            "1 entry: 1 pushed".to_owned(),
+        ])
+    );
+    assert_clean_project(&project);
+
+    // Verify store has the new content
+    assert_eq!(read(&store.join("alpha").join("SKILL.md")), local_modified);
+
+    // Verify status is now ok
+    let status_output = stdout_of(sandbox.skm_in(&project).arg("status"));
+    assert!(status_output.contains("ok"));
+    assert!(status_output.contains("alpha"));
+
+    // Next sync reports ok
+    let second_sync = stdout_of(sandbox.skm_in(&project).arg("sync"));
+    assert_eq!(
+        second_sync,
+        lines(&[
+            line("ok", "alpha", ".agents/skills/alpha", None),
+            "1 entry: 1 ok".to_owned(),
+        ])
+    );
+}
+
+#[test]
+fn sync_specific_skill_to_store() {
+    let (sandbox, store) = installed();
+    let project = sandbox.project();
+
+    // Also install beta
+    sandbox.skill(&store, "beta", Some("beta"));
+    stdout_of(sandbox.skm_in(&project).args(["add", "beta"]));
+
+    let alpha_edit = "---\nname: alpha\ndescription: alpha edited\n---\n\n# Alpha edited\n";
+    let beta_edit = "---\nname: beta\ndescription: beta edited\n---\n\n# Beta edited\n";
+    write(&dest(&project).join("SKILL.md"), alpha_edit);
+    write(&project.join(".agents/skills/beta/SKILL.md"), beta_edit);
+
+    // Push ONLY alpha to store
+    let output = stdout_of(
+        sandbox
+            .skm_in(&project)
+            .args(["sync", "alpha", "--to-store"]),
+    );
+    assert_eq!(
+        output,
+        lines(&[
+            line("pushed", "alpha", ".agents/skills/alpha", None),
+            "1 entry: 1 pushed".to_owned(),
+        ])
+    );
+
+    // alpha in store is updated, beta in store is not updated
+    assert_eq!(read(&store.join("alpha").join("SKILL.md")), alpha_edit);
+    assert_ne!(read(&store.join("beta").join("SKILL.md")), beta_edit);
+
+    // Status: alpha is ok, beta is still modified
+    let status = stdout_of(sandbox.skm_in(&project).arg("status"));
+    assert!(status.contains("alpha"));
+    assert!(status.contains("beta"));
+    assert!(status.contains("modified"));
+}
+
+#[test]
+fn sync_to_store_re_attaches_detached_skill() {
+    let (sandbox, store) = installed();
+    let project = sandbox.project();
+
+    let local_modified = "---\nname: alpha\ndescription: local edits\n---\n\n# Local edits\n";
+    write(&dest(&project).join("SKILL.md"), local_modified);
+
+    // Normal sync detaches it
+    let sync_output = stdout_of(sandbox.skm_in(&project).arg("sync"));
+    assert!(sync_output.contains("detached"));
+
+    // Now push to store
+    let push_output = stdout_of(sandbox.skm_in(&project).args(["sync", "--to-store"]));
+    assert_eq!(
+        push_output,
+        lines(&[
+            line("pushed", "alpha", ".agents/skills/alpha", None),
+            "1 entry: 1 pushed".to_owned(),
+        ])
+    );
+
+    assert_eq!(read(&store.join("alpha").join("SKILL.md")), local_modified);
+
+    // Status is now ok and not detached
+    let status_output = stdout_of(sandbox.skm_in(&project).arg("status"));
+    assert!(status_output.contains("ok"));
+    assert!(!status_output.contains("detached"));
+}
+
+#[test]
+fn sync_to_store_dry_run_writes_nothing() {
+    let (sandbox, store) = installed();
+    let project = sandbox.project();
+
+    let original_store_content = read(&store.join("alpha").join("SKILL.md"));
+    let local_modified = "---\nname: alpha\ndescription: local edits\n---\n\n# Local edits\n";
+    write(&dest(&project).join("SKILL.md"), local_modified);
+
+    let output = stdout_of(
+        sandbox
+            .skm_in(&project)
+            .args(["sync", "--to-store", "--dry-run"]),
+    );
+    assert_eq!(
+        output,
+        lines(&[
+            line("pushed", "alpha", ".agents/skills/alpha", None),
+            "1 entry: 1 pushed".to_owned(),
+            "Dry run: nothing was written.".to_owned(),
+        ])
+    );
+
+    // Store is unchanged
+    assert_eq!(
+        read(&store.join("alpha").join("SKILL.md")),
+        original_store_content
+    );
+}

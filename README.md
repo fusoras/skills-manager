@@ -66,7 +66,7 @@ For complete details on store normalization, default targets, agent overrides, a
 | `skm add [<skill>...] [-i] [--pack] [agent flags] [--pin] [--force] [--dry-run]` | Copy skills into targets (interactive picker if empty)    |
 | `skm remove <skill>... [--pack] [agent flags] [--force] [--dry-run]`      | Delete copies or unlink packs with reference counting      |
 | `skm status [-p\|--project] [-g\|--global] [--packs]`                      | Unified visual status of project and global skills         |
-| `skm sync [--force] [--dry-run]`                                          | Reconcile the project with the store                       |
+| `skm sync [<skill>...] [--to-store] [-g\|--global] [--force] [--dry-run]` | Reconcile project with the store (or push edits back with `--to-store`) |
 
 `skm list` prints the skills available in the store. Passing `--desc` (or `-d` / `--description`) includes the skill description dimmed in gray, truncated dynamically with an ellipsis (`...`) to adapt to the terminal width without hiding the first word.
 
@@ -255,6 +255,7 @@ wrote are ever refreshed: everything else is reported and left exactly as it is.
 | `replaced`  | `--force`: a locally modified copy was overwritten                |
 | `pinned`    | the copy is pinned, so it is never updated                        |
 | `detached`  | a locally modified copy: detached tombstone recorded, fork kept   |
+| `pushed`    | `--to-store`: local copy pushed to the store, state re-attached   |
 | `skipped`   | the store cannot provide the skill                                |
 | `unmanaged` | a directory in a target that nothing records                      |
 
@@ -278,6 +279,20 @@ ok         git-commit -> .agents/skills/git-commit
   reported as `skipped (no store registered)`: nothing is touched either way.
 - `--dry-run` prints the plan and writes nothing at all.
 - Sync is idempotent: running it again reports everything as `ok`.
+
+#### Pushing modifications back to the store (`--to-store`)
+
+Pass `--to-store` to push local skill modifications from your project or global environment back into the registered store:
+
+```sh
+skm sync --to-store              # push all modified/detached skills back to the store
+skm sync git-commit --to-store   # push a specific skill to the store
+skm sync git-commit              # sync only git-commit from store to project
+```
+
+- Pushing atomically copies the full skill tree (preserving `templates/`, `scripts/`, permissions, etc.) into the store.
+- If the skill was previously marked as **detached** (`⤹ detached`), pushing it clears the tombstone and restores its status to **`✔ ok`**.
+- **Divergence guard**: if the store copy also changed since installation, `skm` guards against accidental overwrites and requires `--force` to overwrite the store.
 
 ## References
 

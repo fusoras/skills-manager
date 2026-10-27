@@ -220,10 +220,12 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
         }
         Commands::Pack { action } => pack_cmd(out, action),
         Commands::Sync {
+            skills,
+            to_store,
             force,
             dry_run,
             global,
-        } => sync_cmd(out, force, dry_run, global),
+        } => sync_cmd(out, skills, to_store, force, dry_run, global),
         Commands::Projects => projects_cmd(out),
     }
 }
@@ -504,14 +506,26 @@ fn remove_line(style: Style, plan: &RemovePlan, dry_run: bool) -> String {
 }
 
 /// `skm sync`: reconcile every declared copy, then report the plan.
-fn sync_cmd(out: &mut Printer, force: bool, dry_run: bool, global: bool) -> Result<()> {
+fn sync_cmd(
+    out: &mut Printer,
+    skills: Vec<String>,
+    to_store: bool,
+    force: bool,
+    dry_run: bool,
+    global: bool,
+) -> Result<()> {
     let config = config::load()?;
     let mut project = if global {
         Project::open_global()?
     } else {
         Project::open()?
     };
-    let plans = sync::plan_sync(&config, &project, force)?;
+    let options = sync::SyncOptions {
+        force,
+        to_store,
+        skills,
+    };
+    let plans = sync::plan_sync(&config, &project, &options)?;
 
     if !dry_run {
         sync::apply_sync(&mut project, &plans)?;
@@ -550,7 +564,8 @@ fn sync_line(style: Style, plan: &SyncPlan) -> String {
         | SyncAction::Updated
         | SyncAction::Installed
         | SyncAction::Restored
-        | SyncAction::Adopted => style.ok(&keyword),
+        | SyncAction::Adopted
+        | SyncAction::Pushed => style.ok(&keyword),
         SyncAction::Pinned => style.ident(&keyword),
         SyncAction::Replaced | SyncAction::Detached | SyncAction::Skipped => style.warn(&keyword),
         SyncAction::Unmanaged => style.fail(&keyword),

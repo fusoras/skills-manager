@@ -75,13 +75,21 @@ impl Fixture {
 
     fn plan(&self, entries: &[SkillState], force: bool) -> Vec<SyncPlan> {
         let project = self.open(entries);
-        plan_sync(&self.config, &project, force).unwrap()
+        let options = SyncOptions {
+            force,
+            ..SyncOptions::default()
+        };
+        plan_sync(&self.config, &project, &options).unwrap()
     }
 
     /// Plan and apply, as the command does, and return the plans.
     fn sync(&self, entries: &[SkillState], force: bool) -> Vec<SyncPlan> {
         let mut project = self.open(entries);
-        let plans = plan_sync(&self.config, &project, force).unwrap();
+        let options = SyncOptions {
+            force,
+            ..SyncOptions::default()
+        };
+        let plans = plan_sync(&self.config, &project, &options).unwrap();
         apply_sync(&mut project, &plans).unwrap();
         plans
     }
@@ -106,7 +114,7 @@ impl Fixture {
 
 #[test]
 fn keywords_and_notes_are_the_documented_words() {
-    assert_eq!(SyncAction::ALL.len(), 10);
+    assert_eq!(SyncAction::ALL.len(), 11);
     let labels: Vec<(&str, Option<&str>)> = SyncAction::ALL
         .iter()
         .map(|action| (action.keyword(), action.note()))
@@ -123,12 +131,14 @@ fn keywords_and_notes_are_the_documented_words() {
             ("replaced", Some("forced")),
             ("pinned", None),
             ("detached", Some("local modifications")),
+            ("pushed", None),
             ("skipped", Some("store unavailable")),
             ("unmanaged", Some("not managed by skm")),
         ]
     );
     assert_eq!(SkipReason::Unavailable.note(), "store unavailable");
     assert_eq!(SkipReason::NoStore.note(), "no store registered");
+    assert_eq!(SkipReason::LocalMissing.note(), "local copy missing");
 }
 
 #[test]
@@ -137,7 +147,7 @@ fn an_untouched_copy_is_ok_and_writes_nothing() {
     let entry = fixture.entry(false);
     let mut project = fixture.open(std::slice::from_ref(&entry));
 
-    let plans = plan_sync(&fixture.config, &project, false).unwrap();
+    let plans = plan_sync(&fixture.config, &project, &SyncOptions::default()).unwrap();
     apply_sync(&mut project, &plans).unwrap();
 
     assert_eq!(plans.len(), 1);
@@ -360,4 +370,147 @@ fn the_target_recorded_in_the_state_is_used() {
     assert_eq!(plans[0].target, "custom/skills");
     assert_eq!(plans[0].dest_rel, "custom/skills/alpha");
     assert_eq!(plans[0].action, SyncAction::Ok);
+}
+
+#[test]
+fn to_store_pushes_modified_copy_to_store() {
+    let fixture = Fixture::new();
+    let entry = fixture.entry(false);
+    fs::write(
+        fixture.dest().join("SKILL.md"),
+        "name: alpha\nlocally modified\n",
+    )
+    .unwrap();
+
+    let mut project = fixture.open(std::slice::from_ref(&entry));
+    let options = SyncOptions {
+        to_store: true,
+        ..SyncOptions::default()
+    };
+    let plans = plan_sync(&fixture.config, &project, &options).unwrap();
+
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].action, SyncAction::Pushed);
+    assert_eq!(plans[0].skill, "alpha");
+
+    apply_sync(&mut project, &plans).unwrap();
+
+    // Verify store was updated with the local modification
+    assert_eq!(
+        fs::read_to_string(fixture.store.join("alpha").join("SKILL.md")).unwrap(),
+        "name: alpha\nlocally modified\n"
+    );
+
+    // Verify registry hashes are updated
+    let recorded = fixture.recorded("alpha");
+    let current_hash = hash::tree_hash(&fixture.dest()).unwrap();
+    assert_eq!(recorded.written_hash, current_hash);
+    assert_eq!(recorded.source_hash, current_hash);
+    assert!(!recorded.detached);
+}
+
+#[test]
+fn to_store_re_attaches_previously_detached_skill() {
+    let fixture = Fixture::new();
+    let mut entry = fixture.entry(false);
+    entry.detached = true;
+    entry.detached_at = Some(1_700_000_000);
+
+    fs::write(
+        fixture.dest().join("SKILL.md"),
+        "name: alpha\ndetached then pushed\n",
+    )
+    .unwrap();
+
+    let mut project = fixture.open(std::slice::from_ref(&entry));
+    let options = SyncOptions {
+        to_store: true,
+        ..SyncOptions::default()
+    };
+    let plans = plan_sync(&fixture.config, &project, &options).unwrap();
+    assert_eq!(plans[0].action, SyncAction::Pushed);
+
+    apply_sync(&mut project, &plans).unwrap();
+
+    let recorded = fixture.recorded("alpha");
+    assert!(!recorded.detached);
+    assert!(recorded.detached_at.is_none());
+    assert_eq!(recorded.written_hash, recorded.source_hash);
+}
+
+#[test]
+fn to_store_rejects_diverged_store_unless_forced() {
+    let fixture = Fixture::new();
+    let entry = fixture.entry(false);
+
+    // Modify local copy
+    fs::write(
+        fixture.dest().join("SKILL.md"),
+        "name: alpha\nlocal change\n",
+    )
+    .unwrap();
+
+    // Modify store copy (divergence)
+    fs::write(
+        fixture.store.join("alpha").join("SKILL.md"),
+        "name: alpha\nremote store change\n",
+    )
+    .unwrap();
+
+    let project = fixture.open(std::slice::from_ref(&entry));
+    let options = SyncOptions {
+        to_store: true,
+        force: false,
+        ..SyncOptions::default()
+    };
+    let err = plan_sync(&fixture.config, &project, &options).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("pass --force to overwrite the store")
+    );
+
+    // With force, it succeeds and plans Pushed
+    let force_options = SyncOptions {
+        to_store: true,
+        force: true,
+        ..SyncOptions::default()
+    };
+    let plans = plan_sync(&fixture.config, &project, &force_options).unwrap();
+    assert_eq!(plans[0].action, SyncAction::Pushed);
+}
+
+#[test]
+fn sync_filters_by_specific_skills() {
+    let fixture = Fixture::new();
+    let entry_alpha = fixture.entry(false);
+
+    // Create beta in store and project
+    fs::create_dir_all(fixture.store.join("beta")).unwrap();
+    fs::write(
+        fixture.store.join("beta").join("SKILL.md"),
+        "name: beta\nv1\n",
+    )
+    .unwrap();
+    let beta_dest = fixture.root.join(".agents/skills/beta");
+    fsops::copy_tree(&fixture.store.join("beta"), &beta_dest).unwrap();
+    let entry_beta = SkillState {
+        name: "beta".to_owned(),
+        source_rel: "beta".to_owned(),
+        target: ".agents/skills".to_owned(),
+        written_hash: hash::tree_hash(&beta_dest).unwrap(),
+        source_hash: hash::tree_hash(&fixture.store.join("beta")).unwrap(),
+        pinned: false,
+        installed_at: 1_760_536_800,
+        ..SkillState::default()
+    };
+
+    let project = fixture.open(&[entry_alpha, entry_beta]);
+
+    let options = SyncOptions {
+        skills: vec!["alpha".to_owned()],
+        ..SyncOptions::default()
+    };
+    let plans = plan_sync(&fixture.config, &project, &options).unwrap();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].skill, "alpha");
 }
