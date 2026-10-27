@@ -8,6 +8,20 @@ file copies**.
 The store is global and unique: one directory per machine, registered by path
 (never by name) in the global configuration.
 
+## Installation
+
+Install the latest pre-compiled binary via curl:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/fusoras/skills-manager/main/install.sh | sh
+```
+
+Or build from source:
+
+```sh
+cargo install --path .
+```
+
 ## Quick start
 
 ```sh
