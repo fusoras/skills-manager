@@ -354,6 +354,9 @@ pub enum RuleCommand {
         /// Target .pi/AGENTS.md (or ~/.pi/agent/AGENTS.md with --global)
         #[arg(long)]
         pi: bool,
+        /// Target .github/copilot-instructions.md (or ~/.copilot/copilot-instructions.md with --global)
+        #[arg(long)]
+        copilot: bool,
         /// Custom destination file path
         #[arg(long, value_name = "PATH")]
         file: Option<String>,
@@ -408,6 +411,9 @@ pub enum RuleCommand {
         /// Target .pi/AGENTS.md (or ~/.pi/agent/AGENTS.md with --global)
         #[arg(long)]
         pi: bool,
+        /// Target .github/copilot-instructions.md (or ~/.copilot/copilot-instructions.md with --global)
+        #[arg(long)]
+        copilot: bool,
         /// Custom destination file path
         #[arg(long, value_name = "PATH")]
         file: Option<String>,
@@ -864,9 +870,19 @@ mod tests {
                     global,
                     antigravity,
                     pi,
+                    copilot,
                     ..
                 }),
-        } = parse(&["rule", "apply", "default", "-g", "--agy", "--pi"]).command
+        } = parse(&[
+            "rule",
+            "apply",
+            "default",
+            "-g",
+            "--agy",
+            "--pi",
+            "--copilot",
+        ])
+        .command
         else {
             panic!("expected `rule apply`");
         };
@@ -874,6 +890,7 @@ mod tests {
         assert!(global);
         assert!(antigravity);
         assert!(pi);
+        assert!(copilot);
 
         let Commands::Rule {
             action: Some(RuleCommand::Sync { global, dry_run }),

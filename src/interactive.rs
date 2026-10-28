@@ -278,6 +278,11 @@ pub fn select_rule_targets_global() -> Result<Vec<std::path::PathBuf>> {
             is_custom: false,
         },
         RuleAgentChoice {
+            name: "copilot",
+            path: "~/.copilot/copilot-instructions.md",
+            is_custom: false,
+        },
+        RuleAgentChoice {
             name: "Custom path...",
             path: "",
             is_custom: true,

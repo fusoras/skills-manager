@@ -211,6 +211,16 @@ fn resolve_targets_global_never_defaults_to_agents_agents_md() {
     let pi_targets = resolve_rule_targets(&config, None, pi_flags, None, false).unwrap();
     assert_eq!(pi_targets.len(), 1);
     assert!(pi_targets[0].ends_with(".pi/agent/AGENTS.md"));
+
+    // With --copilot flag
+    let copilot_flags = RuleTargetFlags {
+        global: true,
+        copilot: true,
+        ..RuleTargetFlags::default()
+    };
+    let copilot_targets = resolve_rule_targets(&config, None, copilot_flags, None, false).unwrap();
+    assert_eq!(copilot_targets.len(), 1);
+    assert!(copilot_targets[0].ends_with(".copilot/copilot-instructions.md"));
 }
 
 #[test]
@@ -231,4 +241,16 @@ fn resolve_targets_local_defaults_to_agents_md() {
     let pi_targets = resolve_rule_targets(&config, Some(root), pi_local, None, false).unwrap();
     assert_eq!(pi_targets.len(), 1);
     assert_eq!(pi_targets[0], root.join(".pi").join("AGENTS.md"));
+
+    let copilot_local = RuleTargetFlags {
+        copilot: true,
+        ..RuleTargetFlags::default()
+    };
+    let copilot_targets =
+        resolve_rule_targets(&config, Some(root), copilot_local, None, false).unwrap();
+    assert_eq!(copilot_targets.len(), 1);
+    assert_eq!(
+        copilot_targets[0],
+        root.join(".github").join("copilot-instructions.md")
+    );
 }

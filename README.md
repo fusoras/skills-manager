@@ -334,7 +334,7 @@ When applied to a target file, `skm` encloses instructions inside comment marker
 In project mode, `skm rule apply` defaults to `AGENTS.md` in the project root.
 
 In `--global` mode, **`skm` strictly refuses to default to `~/.agents/AGENTS.md`** because no standard AI agent reads that path. Instead:
-- Specify an explicit agent flag: `--agy` (`~/.gemini/GEMINI.md`), `--claude` (`~/.claude/CLAUDE.md`), `--opencode` (`~/.config/opencode/AGENTS.md`), `--cursor` (`~/.cursor/AGENTS.md`), `--pi` (`~/.pi/agent/AGENTS.md`).
+- Specify an explicit agent flag: `--agy` (`~/.gemini/GEMINI.md`), `--claude` (`~/.claude/CLAUDE.md`), `--opencode` (`~/.config/opencode/AGENTS.md`), `--cursor` (`~/.cursor/AGENTS.md`), `--pi` (`~/.pi/agent/AGENTS.md`), `--copilot` (`~/.copilot/copilot-instructions.md`).
 - Or pass an explicit file path with `--file <path>`.
 - In interactive terminals without flags, an interactive multi-select menu lets you pick target agents or enter a custom file path. In non-interactive environments, it fails with a helpful error.
 

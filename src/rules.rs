@@ -51,11 +51,18 @@ pub struct RuleTargetFlags {
     pub opencode: bool,
     pub cursor: bool,
     pub pi: bool,
+    pub copilot: bool,
 }
 
 impl RuleTargetFlags {
     pub fn any_agent(self) -> bool {
-        self.antigravity || self.claude || self.opencode || self.cursor || self.pi || self.agent
+        self.antigravity
+            || self.claude
+            || self.opencode
+            || self.cursor
+            || self.pi
+            || self.copilot
+            || self.agent
     }
 }
 
@@ -505,6 +512,9 @@ pub fn resolve_rule_targets(
         if flags.pi {
             targets.push(store::expand_tilde("~/.pi/agent/AGENTS.md"));
         }
+        if flags.copilot {
+            targets.push(store::expand_tilde("~/.copilot/copilot-instructions.md"));
+        }
 
         if !targets.is_empty() {
             return Ok(targets);
@@ -516,7 +526,7 @@ pub fn resolve_rule_targets(
         }
 
         bail!(
-            "--global requires specifying a target agent (--agy, --claude, --opencode, --cursor, --pi) or --file <path>"
+            "--global requires specifying a target agent (--agy, --claude, --opencode, --cursor, --pi, --copilot) or --file <path>"
         );
     }
 
@@ -542,6 +552,9 @@ pub fn resolve_rule_targets(
         }
         if flags.pi {
             targets.push(root.join(".pi").join(store::AGENTS_FILE));
+        }
+        if flags.copilot {
+            targets.push(root.join(".github").join("copilot-instructions.md"));
         }
         return Ok(targets);
     }

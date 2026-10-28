@@ -278,7 +278,7 @@ fn rule_global_without_target_fails_in_non_interactive_mode() {
         .assert()
         .failure()
         .stderr(predicates::str::contains(
-            "--global requires specifying a target agent (--agy, --claude, --opencode, --cursor, --pi) or --file <path>",
+            "--global requires specifying a target agent (--agy, --claude, --opencode, --cursor, --pi, --copilot) or --file <path>",
         ));
 
     // Ensure ~/.agents/AGENTS.md was NEVER created
@@ -314,4 +314,21 @@ fn rule_global_with_agent_flag_installs_to_expected_agent_path() {
     let pi_content = fs::read_to_string(&pi_target).expect("read ~/.pi/agent/AGENTS.md");
     assert!(pi_content.contains("<!-- BEGIN SKM INSTRUCTIONS -->"));
     assert!(pi_content.contains("# Root Agent Guidelines"));
+
+    // Global Copilot target: ~/.copilot/copilot-instructions.md
+    sandbox
+        .skm()
+        .args(["rule", "apply", "--global", "--copilot"])
+        .assert()
+        .success();
+
+    let copilot_target = sandbox
+        .home
+        .join(".copilot")
+        .join("copilot-instructions.md");
+    assert!(copilot_target.is_file());
+    let copilot_content =
+        fs::read_to_string(&copilot_target).expect("read ~/.copilot/copilot-instructions.md");
+    assert!(copilot_content.contains("<!-- BEGIN SKM INSTRUCTIONS -->"));
+    assert!(copilot_content.contains("# Root Agent Guidelines"));
 }

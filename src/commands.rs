@@ -1141,6 +1141,7 @@ fn rule_cmd(out: &mut Printer, action: Option<RuleCommand>) -> Result<()> {
             opencode,
             cursor,
             pi,
+            copilot,
             file,
             interactive,
             overwrite,
@@ -1154,6 +1155,7 @@ fn rule_cmd(out: &mut Printer, action: Option<RuleCommand>) -> Result<()> {
                 opencode,
                 cursor,
                 pi,
+                copilot,
             };
             rule_apply(out, name, flags, file, interactive, overwrite, dry_run)
         }
@@ -1167,6 +1169,7 @@ fn rule_cmd(out: &mut Printer, action: Option<RuleCommand>) -> Result<()> {
             opencode,
             cursor,
             pi,
+            copilot,
             file,
             dry_run,
         } => {
@@ -1178,6 +1181,7 @@ fn rule_cmd(out: &mut Printer, action: Option<RuleCommand>) -> Result<()> {
                 opencode,
                 cursor,
                 pi,
+                copilot,
             };
             rule_remove(out, name, flags, file, dry_run)
         }
