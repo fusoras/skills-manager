@@ -67,6 +67,12 @@ For complete details on store normalization, default targets, agent overrides, a
 | `skm remove <skill>... [--pack] [agent flags] [--force] [--dry-run]`      | Delete copies or unlink packs with reference counting      |
 | `skm status [-p\|--project] [-g\|--global] [--packs]`                      | Unified visual status of project and global skills         |
 | `skm sync [<skill>...] [--to-store] [-g\|--global] [--force] [--dry-run]` | Reconcile project with the store (or push edits back with `--to-store`) |
+| `skm rule [list]`                                                         | List rules and instruction files available in store        |
+| `skm rule show <name>`                                                    | Print rule content from the store                          |
+| `skm rule apply [<name>] [-g] [agent flags] [--file <path>] [--overwrite]`| Non-destructively inject rule block into agent files       |
+| `skm rule sync [-g\|--global] [--dry-run]`                                | Reconcile applied rules with the store                     |
+| `skm rule status [-p\|--project] [-g\|--global]`                          | State of applied rules (ok, modified, behind, missing)    |
+| `skm rule remove <name> [-g] [agent flags] [--file <path>] [--dry-run]`    | Non-destructively remove managed rule block from target     |
 
 `skm list` prints the skills available in the store. Passing `--desc` (or `-d` / `--description`) includes the skill description dimmed in gray, truncated dynamically with an ellipsis (`...`) to adapt to the terminal width without hiding the first word.
 
@@ -293,6 +299,53 @@ skm sync git-commit              # sync only git-commit from store to project
 - Pushing atomically copies the full skill tree (preserving `templates/`, `scripts/`, permissions, etc.) into the store.
 - If the skill was previously marked as **detached** (`⤹ detached`), pushing it clears the tombstone and restores its status to **`✔ ok`**.
 - **Divergence guard**: if the store copy also changed since installation, `skm` guards against accidental overwrites and requires `--force` to overwrite the store.
+
+## Agent Rules & Instructions (`AGENTS.md`)
+
+`skm rule` manages instructions and prompt guidelines for AI agents (such as `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`) using non-destructive marker injection.
+
+### Store Format
+
+Rules in your store are pure Markdown files without artificial comment delimiters:
+- `<store>/AGENTS.md`: Default project/agent rule.
+- `<store>/rules/<name>.md`: Specific rules (e.g., `rules/review.md`, `rules/gemini.md`).
+
+### Target Injection & Delimiters
+
+When applied to a target file, `skm` encloses instructions inside comment markers:
+
+```markdown
+# Team Project Notes (stays untouched)
+
+<!-- BEGIN SKM INSTRUCTIONS -->
+# Store Guidelines
+- Follow standard formatting
+<!-- END SKM INSTRUCTIONS -->
+
+# Custom Developer Notes (stays untouched)
+```
+
+- **Non-destructive updates**: Any text outside the comment markers is preserved completely during updates or `skm rule sync`.
+- **Tagged sub-rules**: Sub-rules use tagged markers like `<!-- BEGIN SKM INSTRUCTIONS: review -->`, allowing multiple rules to co-exist in a single file.
+- **Whole-file replacement**: Specifying `--overwrite` replaces the whole file with the marked block.
+
+### Global Safety & Target Resolution
+
+In project mode, `skm rule apply` defaults to `AGENTS.md` in the project root.
+
+In `--global` mode, **`skm` strictly refuses to default to `~/.agents/AGENTS.md`** because no standard AI agent reads that path. Instead:
+- Specify an explicit agent flag: `--agy` (`~/.gemini/GEMINI.md`), `--claude` (`~/.claude/CLAUDE.md`), `--opencode` (`~/.config/opencode/AGENTS.md`), `--cursor` (`~/.cursor/AGENTS.md`).
+- Or pass an explicit file path with `--file <path>`.
+- In interactive terminals without flags, an interactive multi-select menu lets you pick target agents or enter a custom file path. In non-interactive environments, it fails with a helpful error.
+
+```sh
+skm rule apply                     # Injects default rule into ./AGENTS.md
+skm rule apply review              # Injects rules/review.md with tagged markers
+skm rule apply --global --agy      # Injects default rule into ~/.gemini/GEMINI.md
+skm rule status                    # Displays applied rule status (ok, modified, behind, missing)
+skm rule sync                      # Synchronizes rule blocks with store updates
+skm rule remove review             # Non-destructively removes the review block
+```
 
 ## References
 

@@ -169,6 +169,12 @@ pub enum Commands {
     },
     /// List projects managed by skm on this machine
     Projects,
+    /// Show or manage AGENTS.md and instruction files
+    Rule {
+        /// Rule action to run (defaults to `list`)
+        #[command(subcommand)]
+        action: Option<RuleCommand>,
+    },
 }
 
 /// Actions of `skm pack`.
@@ -311,6 +317,98 @@ pub enum StoreCommand {
     Remove,
     /// Scan the store for skills and report its layout
     Scan,
+}
+
+/// Actions of `skm rule`.
+#[derive(Debug, Subcommand)]
+pub enum RuleCommand {
+    /// List available rules/instructions in the store (same as plain `skm rule`)
+    #[command(alias = "ls")]
+    List,
+    /// Show the content of a rule in the store
+    Show {
+        /// Rule name to inspect (leave empty or "default" for AGENTS.md)
+        #[arg(default_value = "default")]
+        name: String,
+    },
+    /// Apply or update instruction rules in targets
+    #[command(alias = "add")]
+    Apply {
+        /// Rule name in store (defaults to "default" / AGENTS.md)
+        name: Option<String>,
+        /// Apply to global agent files instead of project
+        #[arg(short = 'g', long)]
+        global: bool,
+        /// Target .gemini/GEMINI.md (or ~/.gemini/GEMINI.md with --global)
+        #[arg(long, alias = "agy")]
+        antigravity: bool,
+        /// Target CLAUDE.md (or ~/.claude/CLAUDE.md with --global)
+        #[arg(long)]
+        claude: bool,
+        /// Target AGENTS.md (or ~/.config/opencode/AGENTS.md with --global)
+        #[arg(long)]
+        opencode: bool,
+        /// Target .cursor/AGENTS.md (or ~/.cursor/AGENTS.md with --global)
+        #[arg(long)]
+        cursor: bool,
+        /// Custom destination file path
+        #[arg(long, value_name = "PATH")]
+        file: Option<String>,
+        /// Interactive selection mode
+        #[arg(short = 'i', long)]
+        interactive: bool,
+        /// Overwrite the entire file with marked instructions if no markers exist
+        #[arg(long)]
+        overwrite: bool,
+        /// Show what would happen without writing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Reconcile applied rules with the store
+    Sync {
+        /// Sync global rules instead of current project
+        #[arg(short = 'g', long)]
+        global: bool,
+        /// Show what would happen without writing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show status of applied rules
+    Status {
+        /// Show status of global rules instead of current project
+        #[arg(short = 'g', long)]
+        global: bool,
+        /// Show status of project rules only
+        #[arg(short = 'p', long)]
+        project: bool,
+    },
+    /// Remove applied rule block from target files
+    Remove {
+        /// Rule name to remove (defaults to "default")
+        #[arg(default_value = "default")]
+        name: String,
+        /// Remove from global agent files instead of project
+        #[arg(short = 'g', long)]
+        global: bool,
+        /// Target .gemini/GEMINI.md (or ~/.gemini/GEMINI.md with --global)
+        #[arg(long, alias = "agy")]
+        antigravity: bool,
+        /// Target CLAUDE.md (or ~/.claude/CLAUDE.md with --global)
+        #[arg(long)]
+        claude: bool,
+        /// Target AGENTS.md (or ~/.config/opencode/AGENTS.md with --global)
+        #[arg(long)]
+        opencode: bool,
+        /// Target .cursor/AGENTS.md (or ~/.cursor/AGENTS.md with --global)
+        #[arg(long)]
+        cursor: bool,
+        /// Custom destination file path
+        #[arg(long, value_name = "PATH")]
+        file: Option<String>,
+        /// Show what would happen without writing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[cfg(test)]
@@ -743,6 +841,47 @@ mod tests {
         let Commands::Sync { global, .. } = parse(&["sync", "-g"]).command else {
             panic!("expected `sync`");
         };
+        assert!(global);
+    }
+
+    #[test]
+    fn rule_command_parses_subcommands() {
+        let Commands::Rule { action } = parse(&["rule"]).command else {
+            panic!("expected `rule`");
+        };
+        assert!(action.is_none());
+
+        let Commands::Rule {
+            action:
+                Some(RuleCommand::Apply {
+                    name,
+                    global,
+                    antigravity,
+                    ..
+                }),
+        } = parse(&["rule", "apply", "default", "-g", "--agy"]).command
+        else {
+            panic!("expected `rule apply`");
+        };
+        assert_eq!(name.as_deref(), Some("default"));
+        assert!(global);
+        assert!(antigravity);
+
+        let Commands::Rule {
+            action: Some(RuleCommand::Sync { global, dry_run }),
+        } = parse(&["rule", "sync", "--dry-run"]).command
+        else {
+            panic!("expected `rule sync`");
+        };
+        assert!(!global && dry_run);
+
+        let Commands::Rule {
+            action: Some(RuleCommand::Remove { name, global, .. }),
+        } = parse(&["rule", "remove", "default", "-g"]).command
+        else {
+            panic!("expected `rule remove`");
+        };
+        assert_eq!(name, "default");
         assert!(global);
     }
 }

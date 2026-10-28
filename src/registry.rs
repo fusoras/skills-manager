@@ -49,6 +49,26 @@ pub struct ProjectRecord {
     /// Installed skills.
     #[serde(default, rename = "skill", skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<SkillState>,
+    /// Applied instruction rules.
+    #[serde(default, rename = "rule", skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<RuleState>,
+}
+
+/// One applied rule in a project or globally.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleState {
+    /// Rule name (e.g. "default", "AGENTS", or rule stem).
+    pub name: String,
+    /// Rule file relative to store root (e.g. "AGENTS.md" or "rules/gemini.md").
+    pub source_rel: String,
+    /// Destination file as recorded (e.g. "AGENTS.md", "~/.gemini/GEMINI.md").
+    pub target_file: String,
+    /// Hash of the instruction content applied to the destination.
+    pub applied_hash: String,
+    /// Hash of the store rule content when applied.
+    pub source_hash: String,
+    /// Timestamp when applied, epoch seconds.
+    pub applied_at: i64,
 }
 
 /// One installed skill in a project.
@@ -177,9 +197,39 @@ impl ProjectRecord {
         targets
     }
 
+    /// Look up an applied rule by name and target file.
+    #[allow(dead_code)]
+    pub fn get_rule(&self, name: &str, target_file: &str) -> Option<&RuleState> {
+        self.rules
+            .iter()
+            .find(|entry| entry.name == name && entry.target_file == target_file)
+    }
+
+    /// Insert or update a rule entry.
+    pub fn upsert_rule(&mut self, entry: RuleState) {
+        match self.rules.iter_mut().find(|existing| {
+            existing.name == entry.name && existing.target_file == entry.target_file
+        }) {
+            Some(existing) => *existing = entry,
+            None => self.rules.push(entry),
+        }
+    }
+
+    /// Remove and return the rule entry for `name` and `target_file`.
+    pub fn remove_rule(&mut self, name: &str, target_file: &str) -> Option<RuleState> {
+        let index = self
+            .rules
+            .iter()
+            .position(|entry| entry.name == name && entry.target_file == target_file)?;
+        Some(self.rules.remove(index))
+    }
+
     /// Returns `true` if there are no installed skills and no custom target.
     pub fn is_empty(&self) -> bool {
-        self.skills.is_empty() && self.packs.is_empty() && self.target.is_none()
+        self.skills.is_empty()
+            && self.packs.is_empty()
+            && self.rules.is_empty()
+            && self.target.is_none()
     }
 }
 
@@ -447,5 +497,33 @@ mod tests {
         record.upsert(sample_skill("alpha", ".agents/skills"));
         assert!(record.remove("alpha", ".agents/skills").is_some());
         assert!(record.is_empty());
+    }
+
+    #[test]
+    fn rules_upsert_get_and_remove() {
+        let mut record = ProjectRecord::default();
+        assert!(record.rules.is_empty());
+
+        let rule = RuleState {
+            name: "default".to_string(),
+            target_file: "AGENTS.md".to_string(),
+            applied_hash: "blake3:abc".to_string(),
+            source_hash: "blake3:abc".to_string(),
+            source_rel: "AGENTS.md".to_string(),
+            applied_at: 100,
+        };
+        record.upsert_rule(rule.clone());
+        assert_eq!(record.rules.len(), 1);
+        assert_eq!(record.get_rule("default", "AGENTS.md"), Some(&rule));
+
+        let mut updated = rule.clone();
+        updated.applied_hash = "blake3:xyz".to_string();
+        record.upsert_rule(updated.clone());
+        assert_eq!(record.rules.len(), 1);
+        assert_eq!(record.get_rule("default", "AGENTS.md"), Some(&updated));
+
+        assert!(record.remove_rule("default", "AGENTS.md").is_some());
+        assert_eq!(record.get_rule("default", "AGENTS.md"), None);
+        assert!(record.rules.is_empty());
     }
 }

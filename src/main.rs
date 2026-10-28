@@ -16,6 +16,7 @@ mod output;
 mod pack;
 mod project;
 mod registry;
+mod rules;
 mod skill;
 mod status;
 mod store;

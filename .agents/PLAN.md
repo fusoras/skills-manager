@@ -5,7 +5,7 @@ what exists today; this file keeps what is still missing.
 
 ## Status
 
-**Implemented: M0 – M3 + Global Agent Skills + Interactive UX & Unified Status + Upstream Sync (`--to-store`)** (223 tests green).
+**Implemented: M0 – M3 + Global Agent Skills + Interactive UX & Unified Status + Upstream Sync (`--to-store`) + AGENTS.md & Rule Injection (`skm rule`)** (233 tests green).
 - The store is **global and unique**: one directory per machine, registered by path.
 - **Zero-pollution architecture**: target projects contain NO `skills.toml`, NO `.skills-manager/` directory, and require NO `.gitignore` changes. All project metadata, targets, pins, tree hashes, and detached tombstones live centrally in `~/.local/state/skm/projects.toml`.
 - Added `skm projects` command to list all managed projects on the machine.
@@ -18,6 +18,11 @@ what exists today; this file keeps what is still missing.
   - `skm sync --to-store` and `skm sync <skill> --to-store` push locally modified or detached copies back to the store, clearing detached tombstones and restoring status to `ok`.
   - Selective skill argument `skm sync [SKILL]...` to sync or push specific skills.
   - Safe divergence protection requiring `--force` if the store copy also changed independently.
+- **Agent Rules & Instructions (`skm rule`)**:
+  - Pure Markdown store files (`<store>/AGENTS.md` and `<store>/rules/*.md`) injected non-destructively into target files using comment delimiters (`<!-- BEGIN SKM INSTRUCTIONS --> ... <!-- END SKM INSTRUCTIONS -->`).
+  - Preserves surrounding user notes, comments, and project documentation completely untouched during sync and updates.
+  - Commands: `skm rule apply`, `skm rule sync`, `skm rule status`, `skm rule list`, `skm rule show`, `skm rule remove`.
+  - Strict global safety: never defaults `--global` to `~/.agents/AGENTS.md`; requires explicit agent flag, `--file <path>`, or interactive picker with custom path input.
 
 | Phase | Scope | State |
 | --- | --- | --- |

@@ -28,6 +28,12 @@ pub const SKILLS_SUBDIR: &str = "skills";
 /// Directory holding pack definitions; it is never treated as a skill.
 pub const PACKS_SUBDIR: &str = "packs";
 
+/// Directory holding rule and instruction definitions; it is never treated as a skill.
+pub const RULES_SUBDIR: &str = "rules";
+
+/// Canonical default rule file in store.
+pub const AGENTS_FILE: &str = "AGENTS.md";
+
 /// Layout of a store on disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layout {
@@ -287,7 +293,8 @@ fn scan_root(root: &Path, layout: Layout) -> Result<(Vec<Skill>, Vec<String>, us
     let mut warnings = Vec::new();
 
     for dir in subdirectories(&base)? {
-        if is_hidden(&dir) || (layout == Layout::Flat && is_packs_dir(&dir)) {
+        if is_hidden(&dir) || (layout == Layout::Flat && (is_packs_dir(&dir) || is_rules_dir(&dir)))
+        {
             continue;
         }
         if skill::is_skill_dir(&dir) {
@@ -370,6 +377,11 @@ fn is_hidden(path: &Path) -> bool {
 /// `true` when `path` is the `packs/` directory.
 fn is_packs_dir(path: &Path) -> bool {
     path.file_name() == Some(OsStr::new(PACKS_SUBDIR))
+}
+
+/// `true` when `path` is the `rules/` directory.
+fn is_rules_dir(path: &Path) -> bool {
+    path.file_name() == Some(OsStr::new(RULES_SUBDIR))
 }
 
 #[cfg(test)]

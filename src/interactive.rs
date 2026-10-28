@@ -231,6 +231,93 @@ pub fn select_packs(config: &Config) -> Result<Vec<String>> {
     }
 }
 
+/// An agent choice for rule instructions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleAgentChoice {
+    pub name: &'static str,
+    pub path: &'static str,
+    pub is_custom: bool,
+}
+
+impl std::fmt::Display for RuleAgentChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_custom {
+            write!(f, "{:<24} (Ruta personalizada)", self.name)
+        } else {
+            write!(f, "{:<24} ({})", self.name, self.path)
+        }
+    }
+}
+
+/// Prompt the user to interactively select global rule agent targets or input a custom path.
+pub fn select_rule_targets_global() -> Result<Vec<std::path::PathBuf>> {
+    let choices = vec![
+        RuleAgentChoice {
+            name: "antigravity / gemini",
+            path: "~/.gemini/GEMINI.md",
+            is_custom: false,
+        },
+        RuleAgentChoice {
+            name: "claude",
+            path: "~/.claude/CLAUDE.md",
+            is_custom: false,
+        },
+        RuleAgentChoice {
+            name: "opencode",
+            path: "~/.config/opencode/AGENTS.md",
+            is_custom: false,
+        },
+        RuleAgentChoice {
+            name: "cursor",
+            path: "~/.cursor/AGENTS.md",
+            is_custom: false,
+        },
+        RuleAgentChoice {
+            name: "Custom path...",
+            path: "",
+            is_custom: true,
+        },
+    ];
+
+    let count = choices.len();
+    let prompt = MultiSelect::new(
+        "Select global target agent(s) or custom destination:",
+        choices,
+    )
+    .with_render_config(render_config())
+    .with_page_size(page_size_for(count))
+    .with_help_message(HELP_MESSAGE);
+
+    let selected = match prompt.prompt() {
+        Ok(s) => s,
+        Err(
+            inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted,
+        ) => {
+            return Ok(Vec::new());
+        }
+        Err(err) => return Err(anyhow::anyhow!("interactive prompt error: {err}")),
+    };
+
+    let mut targets = Vec::new();
+    for item in selected {
+        if item.is_custom {
+            let custom_path = inquire::Text::new("Enter custom destination path:")
+                .with_render_config(render_config())
+                .prompt();
+            match custom_path {
+                Ok(path_str) if !path_str.trim().is_empty() => {
+                    targets.push(store::expand_tilde(path_str.trim()));
+                }
+                _ => {}
+            }
+        } else {
+            targets.push(store::expand_tilde(item.path));
+        }
+    }
+
+    Ok(targets)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

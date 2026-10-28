@@ -11,12 +11,14 @@ use std::io::IsTerminal;
 
 use anyhow::{Context, Result, bail};
 
-use crate::cli::{Cli, Commands, ConfigCommand, PackCommand, StoreCommand};
+use crate::cli::{Cli, Commands, ConfigCommand, PackCommand, RuleCommand, StoreCommand};
 use crate::config::{self, Config};
+use crate::hash;
 use crate::install::{self, Action, AddPlan, RemoveAction, RemovePlan};
 use crate::output::{self, BOLD, Printer, Style};
 use crate::pack;
 use crate::project::Project;
+use crate::rules;
 use crate::skill;
 use crate::status::{self, Health};
 use crate::store::{self, ScanReport};
@@ -227,6 +229,7 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
             global,
         } => sync_cmd(out, skills, to_store, force, dry_run, global),
         Commands::Projects => projects_cmd(out),
+        Commands::Rule { action } => rule_cmd(out, action),
     }
 }
 
@@ -1123,6 +1126,382 @@ fn open_in_editor(path: &std::path::Path) -> Result<()> {
     if !status.success() {
         bail!("editor exited with non-zero status");
     }
+    Ok(())
+}
+
+fn rule_cmd(out: &mut Printer, action: Option<RuleCommand>) -> Result<()> {
+    match action.unwrap_or(RuleCommand::List) {
+        RuleCommand::List => rule_list(out),
+        RuleCommand::Show { name } => rule_show(out, &name),
+        RuleCommand::Apply {
+            name,
+            global,
+            antigravity,
+            claude,
+            opencode,
+            cursor,
+            file,
+            interactive,
+            overwrite,
+            dry_run,
+        } => {
+            let flags = rules::RuleTargetFlags {
+                global,
+                agent: false,
+                antigravity,
+                claude,
+                opencode,
+                cursor,
+            };
+            rule_apply(out, name, flags, file, interactive, overwrite, dry_run)
+        }
+        RuleCommand::Sync { global, dry_run } => rule_sync(out, global, dry_run),
+        RuleCommand::Status { global, project } => rule_status(out, global, project),
+        RuleCommand::Remove {
+            name,
+            global,
+            antigravity,
+            claude,
+            opencode,
+            cursor,
+            file,
+            dry_run,
+        } => {
+            let flags = rules::RuleTargetFlags {
+                global,
+                agent: false,
+                antigravity,
+                claude,
+                opencode,
+                cursor,
+            };
+            rule_remove(out, name, flags, file, dry_run)
+        }
+    }
+}
+
+fn rule_list(out: &mut Printer) -> Result<()> {
+    let config = config::load()?;
+    let store_path = config.store_path()?;
+    let store_root = std::path::Path::new(&store_path);
+
+    let rules_list = rules::list_rules(store_root)?;
+    if rules_list.is_empty() {
+        out.line("No rules or AGENTS.md found in the store.")?;
+        return Ok(());
+    }
+
+    let style = out.style();
+    let rows: Vec<Vec<String>> = rules_list
+        .iter()
+        .map(|rule| {
+            let kind = if rule.is_default { "default" } else { "rule" };
+            vec![
+                style.ident(&rule.name),
+                rule.rel_path.clone(),
+                kind.to_string(),
+            ]
+        })
+        .collect();
+
+    out.table(&["RULE", "SOURCE", "KIND"], &rows)?;
+    Ok(())
+}
+
+fn rule_show(out: &mut Printer, name: &str) -> Result<()> {
+    let config = config::load()?;
+    let store_path = config.store_path()?;
+    let store_root = std::path::Path::new(&store_path);
+
+    let rule = rules::find_rule(store_root, name)?;
+    let content = std::fs::read_to_string(&rule.path)
+        .with_context(|| format!("reading rule file {}", rule.path.display()))?;
+
+    for line in content.lines() {
+        out.line(line)?;
+    }
+    Ok(())
+}
+
+fn rule_apply(
+    out: &mut Printer,
+    name: Option<String>,
+    flags: rules::RuleTargetFlags,
+    file: Option<String>,
+    interactive: bool,
+    overwrite: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let config = config::load()?;
+    let store_path = config.store_path()?;
+    let store_root = std::path::Path::new(&store_path);
+
+    let is_term = std::io::stdin().is_terminal();
+    let is_interactive =
+        interactive || (flags.global && !flags.any_agent() && file.is_none() && is_term);
+
+    let rule_name = name.unwrap_or_else(|| "default".to_string());
+    let rule = rules::find_rule(store_root, &rule_name)?;
+
+    let mut project = if flags.global {
+        Project::open_global()?
+    } else {
+        Project::open()?
+    };
+
+    let targets = rules::resolve_rule_targets(
+        &config,
+        if flags.global {
+            None
+        } else {
+            Some(project.root())
+        },
+        flags,
+        file.as_deref(),
+        is_interactive,
+    )?;
+
+    if targets.is_empty() {
+        out.line("No targets selected.")?;
+        return Ok(());
+    }
+
+    let plans = rules::plan_apply(&rule, &targets, overwrite)?;
+
+    if !dry_run {
+        rules::apply_plans(&mut project, &plans, crate::registry::now_epoch())?;
+    }
+
+    let style = out.style();
+    for plan in &plans {
+        let action_str = match plan.action {
+            rules::RuleAction::Created | rules::RuleAction::Updated => style.ok(plan.action.verb()),
+            rules::RuleAction::Ok => style.ident(plan.action.verb()),
+            rules::RuleAction::Skipped => style.warn(plan.action.verb()),
+            rules::RuleAction::Removed => style.fail(plan.action.verb()),
+        };
+        let note = plan
+            .note
+            .as_deref()
+            .map(|n| format!(" ({n})"))
+            .unwrap_or_default();
+        out.line(&format!(
+            "{action_str:<9} {} -> {}{note}",
+            style.ident(&plan.rule_name),
+            plan.display_target
+        ))?;
+    }
+
+    let noun = if plans.len() == 1 {
+        "target"
+    } else {
+        "targets"
+    };
+    out.line(&format!("{} {noun} updated.", plans.len()))?;
+
+    if dry_run {
+        out.line(DRY_RUN_NOTE)?;
+    }
+
+    Ok(())
+}
+
+fn rule_sync(out: &mut Printer, global: bool, dry_run: bool) -> Result<()> {
+    let config = config::load()?;
+    let mut project = if global {
+        Project::open_global()?
+    } else {
+        Project::open()?
+    };
+
+    let plans = rules::plan_sync(&config, &project)?;
+    if plans.is_empty() {
+        let msg = if global {
+            "Nothing to sync: no global rules recorded."
+        } else {
+            "Nothing to sync: no rules recorded in this project."
+        };
+        out.line(msg)?;
+        return Ok(());
+    }
+
+    if !dry_run {
+        rules::apply_plans(&mut project, &plans, crate::registry::now_epoch())?;
+    }
+
+    let style = out.style();
+    for plan in &plans {
+        let action_str = match plan.action {
+            rules::RuleAction::Created | rules::RuleAction::Updated => style.ok(plan.action.verb()),
+            rules::RuleAction::Ok => style.ident(plan.action.verb()),
+            rules::RuleAction::Skipped => style.warn(plan.action.verb()),
+            rules::RuleAction::Removed => style.fail(plan.action.verb()),
+        };
+        let note = plan
+            .note
+            .as_deref()
+            .map(|n| format!(" ({n})"))
+            .unwrap_or_default();
+        out.line(&format!(
+            "{action_str:<9} {} -> {}{note}",
+            style.ident(&plan.rule_name),
+            plan.display_target
+        ))?;
+    }
+
+    let noun = if plans.len() == 1 { "rule" } else { "rules" };
+    out.line(&format!("{} {noun} reconciled.", plans.len()))?;
+
+    if dry_run {
+        out.line(DRY_RUN_NOTE)?;
+    }
+
+    Ok(())
+}
+
+fn rule_remove(
+    out: &mut Printer,
+    name: String,
+    flags: rules::RuleTargetFlags,
+    file: Option<String>,
+    dry_run: bool,
+) -> Result<()> {
+    let config = config::load()?;
+    let mut project = if flags.global {
+        Project::open_global()?
+    } else {
+        Project::open()?
+    };
+
+    let targets = rules::resolve_rule_targets(
+        &config,
+        if flags.global {
+            None
+        } else {
+            Some(project.root())
+        },
+        flags,
+        file.as_deref(),
+        false,
+    )?;
+
+    let plans = rules::plan_remove(&name, &targets)?;
+
+    if !dry_run {
+        rules::apply_remove(&mut project, &plans)?;
+    }
+
+    let style = out.style();
+    for plan in &plans {
+        let action_str = style.fail(plan.action.verb());
+        let note = plan
+            .note
+            .as_deref()
+            .map(|n| format!(" ({n})"))
+            .unwrap_or_default();
+        out.line(&format!(
+            "{action_str:<9} {} -> {}{note}",
+            style.ident(&plan.rule_name),
+            plan.display_target
+        ))?;
+    }
+
+    if dry_run {
+        out.line(DRY_RUN_NOTE)?;
+    }
+
+    Ok(())
+}
+
+fn rule_status(out: &mut Printer, global: bool, project_only: bool) -> Result<()> {
+    let config = config::load()?;
+    let style = out.style();
+
+    let show_project = !global || project_only;
+    let show_global = global || !project_only;
+
+    if show_project {
+        let project = Project::open()?;
+        if !project.record.rules.is_empty() {
+            out.line(&style.paint(BOLD, "Project Rules:"))?;
+            render_rule_status_table(out, &config, &project)?;
+        } else if project_only {
+            out.line("No rules recorded in this project.")?;
+        }
+    }
+
+    if show_global {
+        let global_proj = Project::open_global()?;
+        if !global_proj.record.rules.is_empty() {
+            if show_project {
+                out.line("")?;
+            }
+            out.line(&style.paint(BOLD, "Global Rules:"))?;
+            render_rule_status_table(out, &config, &global_proj)?;
+        } else if global && !show_project {
+            out.line("No global rules recorded.")?;
+        }
+    }
+
+    Ok(())
+}
+
+fn render_rule_status_table(out: &mut Printer, config: &Config, project: &Project) -> Result<()> {
+    let style = out.style();
+    let store_path = config.store_path().ok();
+    let store_root = store_path.as_ref().map(std::path::Path::new);
+
+    let mut rows = Vec::new();
+
+    for recorded in &project.record.rules {
+        let target_path = store::expand_tilde(&recorded.target_file);
+        let tag = if recorded.name == "default" || recorded.name == "AGENTS" {
+            None
+        } else {
+            Some(recorded.name.as_str())
+        };
+
+        let state_str = if !target_path.is_file() {
+            style.fail("missing")
+        } else if let Ok(content) = std::fs::read_to_string(&target_path) {
+            if let Ok(Some(block)) = rules::extract_block(&content, tag) {
+                let current_hash = hash::content_hash(&block);
+                if let Some(root) = store_root {
+                    if let Ok(rule) = rules::find_rule(root, &recorded.name) {
+                        if let Ok(store_content) = std::fs::read_to_string(&rule.path) {
+                            let s_hash =
+                                hash::content_hash(rules::normalize_rule_content(&store_content));
+                            if current_hash != recorded.applied_hash {
+                                style.warn("modified")
+                            } else if s_hash != current_hash {
+                                style.warn("behind")
+                            } else {
+                                style.ok("ok")
+                            }
+                        } else {
+                            style.warn("store unavailable")
+                        }
+                    } else {
+                        style.warn("store unavailable")
+                    }
+                } else {
+                    style.ident("skipped")
+                }
+            } else {
+                style.warn("modified (no markers)")
+            }
+        } else {
+            style.fail("unreadable")
+        };
+
+        rows.push(vec![
+            style.ident(&recorded.name),
+            recorded.target_file.clone(),
+            state_str,
+        ]);
+    }
+
+    out.table(&["RULE", "TARGET", "STATE"], &rows)?;
     Ok(())
 }
 

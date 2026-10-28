@@ -95,12 +95,19 @@ pub fn tree_hash(root: &Path) -> Result<String> {
 }
 
 /// BLAKE3 of a single file's bytes.
-fn file_hash(path: &Path) -> Result<String> {
+pub fn file_hash(path: &Path) -> Result<String> {
     let mut reader = fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut hasher = blake3::Hasher::new();
     std::io::copy(&mut reader, &mut hasher)
         .with_context(|| format!("hashing {}", path.display()))?;
     Ok(hasher.finalize().to_hex().to_string())
+}
+
+/// BLAKE3 hash of content string bytes with prefix.
+pub fn content_hash(content: &str) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(content.as_bytes());
+    format!("{HASH_PREFIX}{}", hasher.finalize().to_hex())
 }
 
 /// `x` when the entry is executable, `-` otherwise.
@@ -154,6 +161,16 @@ mod tests {
 
         write(&tmp.path().join("extra.txt"), "extra");
         assert_ne!(before, tree_hash(tmp.path()).unwrap());
+    }
+
+    #[test]
+    fn content_hash_has_prefix_and_is_deterministic() {
+        let first = content_hash("hello world");
+        let second = content_hash("hello world");
+        let diff = content_hash("hello world!");
+        assert!(first.starts_with(HASH_PREFIX));
+        assert_eq!(first, second);
+        assert_ne!(first, diff);
     }
 
     #[test]
