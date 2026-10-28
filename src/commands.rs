@@ -815,8 +815,8 @@ fn list_cmd(out: &mut Printer, packs_only: bool, skills_only: bool, show_desc: b
     list_skills(out, show_desc)?;
 
     let config = config::load()?;
-    let store_root = std::path::Path::new(config.store_path()?);
-    let packs = pack::list(store_root).unwrap_or_default();
+    let store_root = config.store_root()?;
+    let packs = pack::list(&store_root).unwrap_or_default();
     if !packs.is_empty() {
         out.line("")?;
         render_packs_table(out, &packs, show_desc)?;
@@ -956,8 +956,8 @@ fn projects_cmd(out: &mut Printer) -> Result<()> {
 
 fn list_packs(out: &mut Printer) -> Result<()> {
     let config = config::load()?;
-    let store_root = std::path::Path::new(config.store_path()?);
-    let packs = pack::list(store_root)?;
+    let store_root = config.store_root()?;
+    let packs = pack::list(&store_root)?;
     if packs.is_empty() {
         out.line("No packs found in the store.")?;
         return Ok(());
@@ -980,8 +980,8 @@ fn list_packs(out: &mut Printer) -> Result<()> {
 
 fn pack_show(out: &mut Printer, name: &str) -> Result<()> {
     let config = config::load()?;
-    let store_root = std::path::Path::new(config.store_path()?);
-    let pack = pack::load(store_root, name)?;
+    let store_root = config.store_root()?;
+    let pack = pack::load(&store_root, name)?;
     let style = out.style();
 
     out.line(&style.paint(BOLD, "Pack"))?;
@@ -1035,13 +1035,13 @@ fn pack_status(out: &mut Printer, global: bool) -> Result<()> {
 
 fn pack_edit(out: &mut Printer, name: &str, add: &[String], remove: &[String]) -> Result<()> {
     let config = config::load()?;
-    let store_root = std::path::Path::new(config.store_path()?);
+    let store_root = config.store_root()?;
     let style = out.style();
 
     if add.is_empty() && remove.is_empty() {
-        let file = pack::ensure_pack_template(store_root, name)?;
+        let file = pack::ensure_pack_template(&store_root, name)?;
         open_in_editor(&file)?;
-        match pack::load(store_root, name) {
+        match pack::load(&store_root, name) {
             Ok(p) => {
                 out.line(&format!(
                     "Pack {} saved ({} skills).",
@@ -1065,9 +1065,9 @@ fn pack_edit(out: &mut Printer, name: &str, add: &[String], remove: &[String]) -
     }
 
     let mut pack = if !remove.is_empty() {
-        pack::remove_skills_from_pack(store_root, name, remove)?
+        pack::remove_skills_from_pack(&store_root, name, remove)?
     } else {
-        pack::load(store_root, name).unwrap_or_else(|_| pack::Pack {
+        pack::load(&store_root, name).unwrap_or_else(|_| pack::Pack {
             name: name.to_owned(),
             description: None,
             skills: Vec::new(),
@@ -1075,7 +1075,7 @@ fn pack_edit(out: &mut Printer, name: &str, add: &[String], remove: &[String]) -
     };
 
     if !add.is_empty() {
-        pack = pack::add_skills_to_pack(store_root, name, add)?;
+        pack = pack::add_skills_to_pack(&store_root, name, add)?;
     }
 
     let count = pack.skills.len();
@@ -1190,8 +1190,7 @@ fn rule_cmd(out: &mut Printer, action: Option<RuleCommand>) -> Result<()> {
 
 fn rule_list(out: &mut Printer) -> Result<()> {
     let config = config::load()?;
-    let store_path = config.store_path()?;
-    let store_root = store::expand_tilde(store_path);
+    let store_root = config.store_root()?;
 
     let rules_list = rules::list_rules(&store_root)?;
     if rules_list.is_empty() {
@@ -1218,8 +1217,7 @@ fn rule_list(out: &mut Printer) -> Result<()> {
 
 fn rule_show(out: &mut Printer, name: &str) -> Result<()> {
     let config = config::load()?;
-    let store_path = config.store_path()?;
-    let store_root = store::expand_tilde(store_path);
+    let store_root = config.store_root()?;
 
     let rule = rules::find_rule(&store_root, name)?;
     let content = std::fs::read_to_string(&rule.path)
@@ -1241,8 +1239,7 @@ fn rule_apply(
     dry_run: bool,
 ) -> Result<()> {
     let config = config::load()?;
-    let store_path = config.store_path()?;
-    let store_root = store::expand_tilde(store_path);
+    let store_root = config.store_root()?;
 
     let is_term = std::io::stdin().is_terminal();
     let is_interactive =
@@ -1456,7 +1453,7 @@ fn rule_status(out: &mut Printer, global: bool, project_only: bool) -> Result<()
 
 fn render_rule_status_table(out: &mut Printer, config: &Config, project: &Project) -> Result<()> {
     let style = out.style();
-    let store_root = config.store_path().ok().map(store::expand_tilde);
+    let store_root = config.store_root().ok();
 
     let mut rows = Vec::new();
 

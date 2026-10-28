@@ -386,7 +386,7 @@ pub fn plan_add(
 
     let mut requests: Vec<Request> = Vec::new();
     let mut recorded_packs: Vec<String> = Vec::new();
-    let store_root = Path::new(config.store_path()?);
+    let store_root = config.store_root()?;
     let report = store::scan(config.store_path()?)?;
     if !report.ready {
         bail!("{}", report.warnings.join("; "));
@@ -395,7 +395,7 @@ pub fn plan_add(
     for item in items {
         match item {
             InstallItem::Pack(pack_name) => {
-                let pack_def = pack::load(store_root, pack_name)?;
+                let pack_def = pack::load(&store_root, pack_name)?;
                 if !recorded_packs.contains(&pack_def.name) {
                     recorded_packs.push(pack_def.name.clone());
                 }
@@ -415,8 +415,8 @@ pub fn plan_add(
                 });
             }
             InstallItem::Auto(name) => {
-                let is_pack = pack::find_pack_file(store_root, name)?.is_some()
-                    || pack::pack_file(store_root, name).is_file();
+                let is_pack = pack::find_pack_file(&store_root, name)?.is_some()
+                    || pack::pack_file(&store_root, name).is_file();
                 let is_skill = report.skills.iter().any(|s| s.name == *name);
 
                 if is_pack && is_skill {
@@ -424,7 +424,7 @@ pub fn plan_add(
                         "'{name}' matches both a skill and a pack in the store; specify '--pack' or '--skill' to disambiguate"
                     );
                 } else if is_pack {
-                    let pack_def = pack::load(store_root, name)?;
+                    let pack_def = pack::load(&store_root, name)?;
                     if !recorded_packs.contains(&pack_def.name) {
                         recorded_packs.push(pack_def.name.clone());
                     }

@@ -5,7 +5,7 @@ what exists today; this file keeps what is still missing.
 
 ## Status
 
-**Implemented: M0 – M3 + Global Agent Skills + Interactive UX & Unified Status + Upstream Sync (`--to-store`) + AGENTS.md & Rule Injection (`skm rule`)** (233 tests green).
+**Implemented: M0 – M3 + Global Agent Skills + Interactive UX & Unified Status + Upstream Sync (`--to-store`) + AGENTS.md & Rule Injection (`skm rule`)** (282 tests green).
 - The store is **global and unique**: one directory per machine, registered by path.
 - **Zero-pollution architecture**: target projects contain NO `skills.toml`, NO `.skills-manager/` directory, and require NO `.gitignore` changes. All project metadata, targets, pins, tree hashes, and detached tombstones live centrally in `~/.local/state/skm/projects.toml`.
 - Added `skm projects` command to list all managed projects on the machine.

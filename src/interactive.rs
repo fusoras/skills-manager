@@ -61,8 +61,8 @@ pub fn select_items(config: &Config) -> Result<Vec<crate::install::InstallItem>>
     if !report.ready {
         bail!("{}", report.warnings.join("; "));
     }
-    let store_root = std::path::Path::new(config.store_path()?);
-    let packs = pack::list(store_root).unwrap_or_default();
+    let store_root = config.store_root()?;
+    let packs = pack::list(&store_root).unwrap_or_default();
 
     if report.skills.is_empty() && packs.is_empty() {
         bail!("no skills or packs found in the store; run `skm store scan` to inspect your store");
@@ -208,8 +208,8 @@ fn agent_choices(config: &Config, global: bool) -> Vec<AgentChoice> {
 
 /// Prompt the user to interactively select packs from the store.
 pub fn select_packs(config: &Config) -> Result<Vec<String>> {
-    let store_root = std::path::Path::new(config.store_path()?);
-    let packs = pack::list(store_root)?;
+    let store_root = config.store_root()?;
+    let packs = pack::list(&store_root)?;
     if packs.is_empty() {
         bail!("no packs found in the store; check <store>/packs/");
     }

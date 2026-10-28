@@ -495,3 +495,55 @@ skills = ["alpha"]
     assert!(out_pack.contains("Installed alpha -> .agents/skills/alpha"));
     assert!(!project.join(".agents/skills/shared").exists());
 }
+
+#[test]
+fn pack_list_and_show_with_tilde_store_path() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.home.join("skills-store");
+    sandbox.skill(&store, "alpha", Some("alpha"));
+    let packs_dir = store.join("packs");
+    fs::create_dir_all(&packs_dir).unwrap();
+    write(
+        &packs_dir.join("frontend.toml"),
+        r#"
+name = "frontend"
+description = "Frontend tools"
+skills = ["alpha"]
+"#,
+    );
+    // Register store under home - this saves store = "~/skills-store" in config.toml
+    sandbox.register_store(&store);
+    assert_eq!(sandbox.config_text().trim(), "store = \"~/skills-store\"");
+
+    let output = stdout_of(sandbox.skm().args(["pack", "list"]));
+    assert!(
+        output.contains("frontend"),
+        "expected pack 'frontend' to be listed, got: {output}"
+    );
+
+    let output_show = stdout_of(sandbox.skm().args(["pack", "show", "frontend"]));
+    assert!(
+        output_show.contains("name         frontend"),
+        "expected pack details, got: {output_show}"
+    );
+
+    // skm list --packs
+    let output_list_packs = stdout_of(sandbox.skm().args(["list", "--packs"]));
+    assert!(
+        output_list_packs.contains("frontend"),
+        "expected pack 'frontend' in list --packs, got: {output_list_packs}"
+    );
+
+    // skm list (showing packs table below skills)
+    let output_list = stdout_of(sandbox.skm().args(["list"]));
+    assert!(
+        output_list.contains("frontend"),
+        "expected pack 'frontend' in list table, got: {output_list}"
+    );
+
+    // install pack into project
+    let project = sandbox.project();
+    let output_add = stdout_of(sandbox.skm_in(&project).args(["add", "frontend"]));
+    assert!(output_add.contains("Installed alpha -> .agents/skills/alpha"));
+    assert!(project.join(".agents/skills/alpha/SKILL.md").exists());
+}

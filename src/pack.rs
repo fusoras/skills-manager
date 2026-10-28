@@ -28,7 +28,7 @@ pub struct Pack {
 
 /// Directory holding pack definitions inside `store_root`.
 pub fn packs_dir(store_root: &Path) -> PathBuf {
-    store_root.join(PACKS_SUBDIR)
+    crate::store::expand_tilde(&store_root.to_string_lossy()).join(PACKS_SUBDIR)
 }
 
 /// Path to `<store_root>/packs/<name>.toml`.

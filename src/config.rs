@@ -88,6 +88,12 @@ impl Config {
         self.store.as_deref().context(NO_STORE)
     }
 
+    /// Path of the global store with `~` expanded, failing when none is registered.
+    pub fn store_root(&self) -> Result<PathBuf> {
+        let path = self.store_path()?;
+        Ok(crate::store::expand_tilde(path))
+    }
+
     /// Target directory for an agent.
     pub fn agent_target(&self, agent: &str) -> String {
         let normalized = match agent {
@@ -354,6 +360,21 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(config.store_path().unwrap(), "~/store");
+    }
+
+    #[test]
+    fn store_root_expands_tilde_and_fails_without_store() {
+        assert_eq!(
+            Config::default().store_root().unwrap_err().to_string(),
+            "no store registered; run `skm store add <path>`"
+        );
+        let config = Config {
+            store: Some("~/my-store".to_owned()),
+            ..Config::default()
+        };
+        let root = config.store_root().unwrap();
+        assert!(!root.to_string_lossy().starts_with('~'));
+        assert!(root.is_absolute());
     }
 
     #[test]

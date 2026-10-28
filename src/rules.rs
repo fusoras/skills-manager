@@ -711,8 +711,7 @@ pub fn apply_remove(project: &mut Project, plans: &[RulePlan]) -> Result<()> {
 
 /// Plan syncing all recorded rules in a project with the registered store.
 pub fn plan_sync(config: &Config, project: &Project) -> Result<Vec<RulePlan>> {
-    let store_path = config.store_path()?;
-    let store_root = store::expand_tilde(store_path);
+    let store_root = config.store_root()?;
 
     let mut plans = Vec::new();
 
