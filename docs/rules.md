@@ -4,19 +4,54 @@
 
 ---
 
-## Architecture & Principles
+## Quick Start
 
-1. **Zero-Pollution Architecture**:
-   - `skm` does not place configuration files, metadata folders, or lockfiles inside target projects.
-   - All state, applied hashes, and tracking are recorded centrally in `~/.local/state/skm/projects.toml`.
-2. **Non-Destructive Marker Injection**:
-   - Injected instructions are bounded by HTML comment markers (`<!-- BEGIN SKM INSTRUCTIONS -->`).
-   - Any content, comments, or guidelines outside the markers remain untouched during updates or synchronization.
-3. **Pure Markdown in Store**:
-   - The store holds raw, standard Markdown files without synthetic comment tags.
-   - Comment delimiters are only introduced when writing to destination target files.
-4. **Deterministic BLAKE3 Hashing**:
-   - Status, updates, and drift are calculated using normalized BLAKE3 hashes, ensuring robust comparison across operating systems without whitespace false positives.
+### 1. View Available Rules
+
+List all rules available in your registered store:
+
+```sh
+skm rule list
+```
+
+### 2. Apply Instructions to Your Project
+
+Inject your store's default instructions into `./AGENTS.md`:
+
+```sh
+skm rule apply
+```
+
+The instructions are placed between comment markers:
+
+```markdown
+<!-- BEGIN SKM INSTRUCTIONS -->
+# Team Conventions
+- Follow standard conventions
+<!-- END SKM INSTRUCTIONS -->
+```
+
+> [!NOTE]
+> You can add any notes, instructions, or comments above or below these markers. `skm` will never touch or overwrite anything outside the markers!
+
+### 3. Apply to a Specific Agent Globally
+
+Configure your global agent instructions (e.g. Antigravity CLI / Gemini, Claude, Cursor):
+
+```sh
+skm rule apply --global --agy       # Configures ~/.gemini/GEMINI.md
+skm rule apply --global --claude    # Configures ~/.claude/CLAUDE.md
+skm rule apply --global --cursor    # Configures ~/.cursor/AGENTS.md
+```
+
+### 4. Check Status & Sync Updates
+
+When shared rules change in the store, inspect drift and sync them:
+
+```sh
+skm rule status                     # Check whether rules are ok, modified, or behind
+skm rule sync                       # Pull latest store updates into your marked blocks
+```
 
 ---
 
