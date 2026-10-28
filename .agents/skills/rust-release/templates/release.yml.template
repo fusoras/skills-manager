@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for release (e.g. v0.1.0)'
+        required: false
+        default: 'v0.1.0'
 
 permissions:
   contents: write
@@ -46,12 +52,13 @@ jobs:
       - name: Package binary into tarball
         run: |
           set -Eeuo pipefail
-          tar -czf {{BIN_NAME}}-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release {{BIN_NAME}}
+          tar --owner=0 --group=0 --numeric-owner -czf {{BIN_NAME}}-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release {{BIN_NAME}}
 
       - name: Upload asset to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: {{BIN_NAME}}-${{ matrix.target }}.tar.gz
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

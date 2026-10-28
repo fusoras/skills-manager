@@ -22,10 +22,21 @@ Every Rust CLI binary in this ecosystem targets two primary platforms without ex
 | **x86_64**   | Debian / Ubuntu / Linux | `x86_64-unknown-linux-gnu` | Default Linux runner target |
 | **aarch64**  | ARM64 Linux & Termux (Android) | `aarch64-unknown-linux-musl` | Cross-compiled using `gcc-aarch64-linux-gnu` and `musl-tools` |
 
+> [!CAUTION]
+> **CRITICAL: NEVER use `aarch64-unknown-linux-gnu` for binaries targeting Termux / Android.**
+> Android does not use GNU libc (`glibc`) nor does it provide the standard Linux ELF interpreter (`/lib/ld-linux-aarch64.so.1`); it uses Bionic libc. Any binary dynamically linked against glibc fails immediately on Termux with `zsh: no such file or directory: ./<binary>` (or `bash: ...: No such file or directory`) even when the file exists and is executable (`chmod +x`).
+> You MUST always cross-compile using `aarch64-unknown-linux-musl` with `musl-tools` and `gcc-aarch64-linux-gnu`. This produces a **100% statically linked binary** that makes direct Linux syscalls and runs flawlessly across both Android/Termux and all standard Linux distributions (Debian, Ubuntu, Alpine, Fedora, Arch).
+
 > [!IMPORTANT]
 > The asset naming convention across both CI and the installer script MUST match:
 > `${BIN_NAME}-${TARGET_TRIPLE}.tar.gz`
 > Example: `skm-x86_64-unknown-linux-gnu.tar.gz` and `skm-aarch64-unknown-linux-musl.tar.gz`.
+
+> [!IMPORTANT]
+> **Tarball Sanitization & Privacy:**
+> Whenever packaging binary tarballs (both in CI and local scripts), ALWAYS use:
+> `tar --owner=0 --group=0 --numeric-owner -czf ...`
+> Omitting these flags embeds the local host user/group names into the `.tar.gz` archive headers, which causes privacy leaks and host username disclosures in release assets.
 
 ---
 
@@ -44,7 +55,7 @@ strip = true        # Automatically strip debug symbols
 ```
 
 ### 2.2. GitHub Actions Release Workflow (`.github/workflows/release.yml`)
-Triggered automatically on version tags (`v*`):
+Triggered automatically on version tags (`v*`) and manually via `workflow_dispatch`:
 
 ```yaml
 name: Release Binaries
@@ -53,6 +64,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for release (e.g. v0.1.0)'
+        required: false
+        default: 'v0.1.0'
 
 permissions:
   contents: write
@@ -95,12 +112,13 @@ jobs:
       - name: Package binary into tarball
         run: |
           set -Eeuo pipefail
-          tar -czf <BIN_NAME>-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release <BIN_NAME>
+          tar --owner=0 --group=0 --numeric-owner -czf <BIN_NAME>-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release <BIN_NAME>
 
       - name: Upload asset to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: <BIN_NAME>-${{ matrix.target }}.tar.gz
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -109,14 +127,17 @@ jobs:
 ### 2.3. Bootstrap Installer Script (`install.sh`)
 Place `install.sh` in the repository root. Key requirements:
 1. **Strict POSIX (`#!/bin/sh` + `set -e`)**: No Bashisms (no `[[`, `function`, or arrays).
-2. **Platform & Termux Detection**:
+2. **Safe Piped Execution (`curl ... | sh`)**:
+   When executed via pipe, `$0` is `sh`, not the script path. Guard directory resolution with `if [ -f "$0" ]` to prevent stdin executions from mistakenly treating the user's current working directory as the repository root.
+3. **Platform & Termux Detection**:
    - In Termux: checks `$TERMUX_VERSION` or `/data/data/com.termux`, installs into `$PREFIX/bin`.
    - In Linux: installs into `$HOME/.local/bin`.
-3. **Architecture Detection**:
+   - Skip systemd units on Termux: Always guard background services with `command -v systemctl >/dev/null 2>&1 && [ "$IS_TERMUX" -eq 0 ]` because Android/Termux does not use systemd.
+4. **Architecture Detection**:
    - `x86_64` / `amd64` -> `x86_64-unknown-linux-gnu`
-   - `aarch64` / `arm64` -> `aarch64-unknown-linux-musl`
-4. **Fallback Mechanism**: Attempts version tag download first (`/download/$VERSION/...`), falls back to `/releases/latest/download/...`.
-5. **Path Validation**: Alerts the user if the destination directory is not present in `$PATH`.
+   - `aarch64` / `arm64` -> `aarch64-unknown-linux-musl` (statically linked for Android/Termux & ARM64 Linux).
+5. **Fallback Mechanism**: Attempts version tag download first (`/download/$VERSION/...`), falls back to `/releases/latest/download/...`.
+6. **Path Validation**: Alerts the user if the destination directory is not present in `$PATH`.
 
 ---
 
