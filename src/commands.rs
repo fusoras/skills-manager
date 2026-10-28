@@ -1183,9 +1183,9 @@ fn rule_cmd(out: &mut Printer, action: Option<RuleCommand>) -> Result<()> {
 fn rule_list(out: &mut Printer) -> Result<()> {
     let config = config::load()?;
     let store_path = config.store_path()?;
-    let store_root = std::path::Path::new(&store_path);
+    let store_root = store::expand_tilde(store_path);
 
-    let rules_list = rules::list_rules(store_root)?;
+    let rules_list = rules::list_rules(&store_root)?;
     if rules_list.is_empty() {
         out.line("No rules or AGENTS.md found in the store.")?;
         return Ok(());
@@ -1211,9 +1211,9 @@ fn rule_list(out: &mut Printer) -> Result<()> {
 fn rule_show(out: &mut Printer, name: &str) -> Result<()> {
     let config = config::load()?;
     let store_path = config.store_path()?;
-    let store_root = std::path::Path::new(&store_path);
+    let store_root = store::expand_tilde(store_path);
 
-    let rule = rules::find_rule(store_root, name)?;
+    let rule = rules::find_rule(&store_root, name)?;
     let content = std::fs::read_to_string(&rule.path)
         .with_context(|| format!("reading rule file {}", rule.path.display()))?;
 
@@ -1234,14 +1234,14 @@ fn rule_apply(
 ) -> Result<()> {
     let config = config::load()?;
     let store_path = config.store_path()?;
-    let store_root = std::path::Path::new(&store_path);
+    let store_root = store::expand_tilde(store_path);
 
     let is_term = std::io::stdin().is_terminal();
     let is_interactive =
         interactive || (flags.global && !flags.any_agent() && file.is_none() && is_term);
 
     let rule_name = name.unwrap_or_else(|| "default".to_string());
-    let rule = rules::find_rule(store_root, &rule_name)?;
+    let rule = rules::find_rule(&store_root, &rule_name)?;
 
     let mut project = if flags.global {
         Project::open_global()?
@@ -1448,8 +1448,7 @@ fn rule_status(out: &mut Printer, global: bool, project_only: bool) -> Result<()
 
 fn render_rule_status_table(out: &mut Printer, config: &Config, project: &Project) -> Result<()> {
     let style = out.style();
-    let store_path = config.store_path().ok();
-    let store_root = store_path.as_ref().map(std::path::Path::new);
+    let store_root = config.store_path().ok().map(store::expand_tilde);
 
     let mut rows = Vec::new();
 
@@ -1466,7 +1465,7 @@ fn render_rule_status_table(out: &mut Printer, config: &Config, project: &Projec
         } else if let Ok(content) = std::fs::read_to_string(&target_path) {
             if let Ok(Some(block)) = rules::extract_block(&content, tag) {
                 let current_hash = hash::content_hash(&block);
-                if let Some(root) = store_root {
+                if let Some(root) = store_root.as_deref() {
                     if let Ok(rule) = rules::find_rule(root, &recorded.name) {
                         if let Ok(store_content) = std::fs::read_to_string(&rule.path) {
                             let s_hash =

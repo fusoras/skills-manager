@@ -408,12 +408,17 @@ pub fn list_rules(store_root: &Path) -> Result<Vec<Rule>> {
 /// Find a specific rule by name in the store root.
 pub fn find_rule(store_root: &Path, name: &str) -> Result<Rule> {
     let available = list_rules(store_root)?;
-    let normalized = name.trim();
+    let mut normalized = name.trim();
+    if let Some(stripped) = normalized.strip_prefix("rules/") {
+        normalized = stripped;
+    }
+    if let Some(stripped) = normalized.strip_suffix(".md") {
+        normalized = stripped;
+    }
 
     if normalized.is_empty()
         || normalized == "default"
-        || normalized == "AGENTS"
-        || normalized == "agents"
+        || normalized.eq_ignore_ascii_case("agents")
     {
         if let Some(def) = available.iter().find(|r| r.is_default) {
             return Ok(def.clone());
@@ -435,7 +440,14 @@ pub fn find_rule(store_root: &Path, name: &str) -> Result<Rule> {
         return Ok(r.clone());
     }
 
-    bail!("rule '{name}' not found in store; run `skm rule list` to see available rules");
+    let names: Vec<&str> = available.iter().map(|r| r.name.as_str()).collect();
+    if names.is_empty() {
+        bail!("rule '{name}' not found; no rules exist in the store");
+    }
+    bail!(
+        "rule '{name}' not found in store; available rules: {}",
+        names.join(", ")
+    );
 }
 
 /// Convert an absolute path to a portable display representation (using `~` for home).
@@ -682,12 +694,12 @@ pub fn apply_remove(project: &mut Project, plans: &[RulePlan]) -> Result<()> {
 /// Plan syncing all recorded rules in a project with the registered store.
 pub fn plan_sync(config: &Config, project: &Project) -> Result<Vec<RulePlan>> {
     let store_path = config.store_path()?;
-    let store_root = Path::new(&store_path);
+    let store_root = store::expand_tilde(store_path);
 
     let mut plans = Vec::new();
 
     for recorded in &project.record.rules {
-        let rule = find_rule(store_root, &recorded.name)?;
+        let rule = find_rule(&store_root, &recorded.name)?;
         let rule_content = fs::read_to_string(&rule.path)?;
         let store_hash = hash::content_hash(normalize_rule_content(&rule_content));
         let target_file = store::expand_tilde(&recorded.target_file);

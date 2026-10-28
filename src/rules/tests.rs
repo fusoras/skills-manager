@@ -164,8 +164,17 @@ fn list_and_find_rules_in_store() {
     let default_rule = find_rule(store_root, "default").unwrap();
     assert_eq!(default_rule.name, "default");
 
+    let agents_md_rule = find_rule(store_root, "AGENTS.md").unwrap();
+    assert_eq!(agents_md_rule.name, "default");
+
     let gemini_rule = find_rule(store_root, "gemini").unwrap();
     assert_eq!(gemini_rule.name, "gemini");
+
+    let gemini_file_rule = find_rule(store_root, "gemini.md").unwrap();
+    assert_eq!(gemini_file_rule.name, "gemini");
+
+    let gemini_path_rule = find_rule(store_root, "rules/gemini.md").unwrap();
+    assert_eq!(gemini_path_rule.name, "gemini");
 }
 
 #[test]
