@@ -353,3 +353,4 @@ skm rule remove review             # Non-destructively removes the review block
 - [Tree Hash](docs/hash.md) — BLAKE3 canonical tree hashing, deterministic ordering, and exclusion rules.
 - [Packs](docs/pack.md) — Named skill collections, multi-target installation, CLI editing, and reference counting.
 - [Sync & Store Push](docs/sync.md) — Reconciliation, auto-detach, upstream push (`--to-store`), and conflict safety.
+- [Rules & AGENTS.md](docs/rules.md) — Non-destructive agent instructions injection, markers, multi-agent targets, and synchronization.
