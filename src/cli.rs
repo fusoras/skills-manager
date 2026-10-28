@@ -37,19 +37,22 @@ pub enum Commands {
         /// Show skill descriptions
         #[arg(short, long, alias = "desc")]
         description: bool,
+        /// Full store report: state, layout, skills, packs and warnings
+        #[arg(long)]
+        all: bool,
     },
-    /// Install skills into this project
+    /// Install skills or packs into this project
     Add {
-        /// Skill names to install (leave empty for interactive selection)
-        #[arg(value_name = "SKILL")]
+        /// Skill or pack names to install (leave empty for interactive selection)
+        #[arg(value_name = "NAME")]
         skills: Vec<String>,
         /// Interactive multi-selection mode
         #[arg(short = 'i', long)]
         interactive: bool,
-        /// Install a pack of skills instead of individual skills
+        /// Treat the names as packs (needed when a skill and a pack share a name)
         #[arg(long, alias = "packs")]
         pack: bool,
-        /// Install individual skills (useful to disambiguate if a pack shares the same name)
+        /// Treat the names as individual skills (needed when a skill and a pack share a name)
         #[arg(long)]
         skill: bool,
         /// Install into global agent directories instead of project
@@ -89,14 +92,17 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Remove skills installed in this project
+    /// Remove skills or packs installed in this project
     Remove {
-        /// Skill names to remove
-        #[arg(required = true, value_name = "SKILL")]
+        /// Skill or pack names to remove
+        #[arg(required = true, value_name = "NAME")]
         skills: Vec<String>,
-        /// Remove a pack of skills instead of individual skills
+        /// Treat the names as packs (needed when a skill and a pack share a name)
         #[arg(long, alias = "packs")]
         pack: bool,
+        /// Treat the names as individual skills (needed when a skill and a pack share a name)
+        #[arg(long)]
+        skill: bool,
         /// Remove from global agent directories instead of project
         #[arg(short = 'g', long)]
         global: bool,
@@ -178,10 +184,15 @@ pub enum Commands {
 }
 
 /// Actions of `skm pack`.
+///
+/// Only `show` and `edit` remain first-class: listing lives in `skm list
+/// --packs`, status in `skm status --packs`, and install/remove in `skm add` /
+/// `skm remove`. The hidden variants below are deprecated aliases kept for one
+/// release; they print a deprecation notice on stderr.
 #[derive(Debug, Subcommand)]
 pub enum PackCommand {
-    /// List packs available in the store (same as plain `skm pack`)
-    #[command(alias = "ls")]
+    /// List packs available in the store (deprecated alias of `skm list --packs`)
+    #[command(alias = "ls", hide = true)]
     List,
     /// Show details of a pack in the store
     Show {
@@ -199,13 +210,15 @@ pub enum PackCommand {
         #[arg(long, num_args = 1.., value_name = "SKILL")]
         remove: Vec<String>,
     },
-    /// Show status of packs installed in this project
+    /// Show status of packs installed in this project (deprecated alias of `skm status --packs`)
+    #[command(hide = true)]
     Status {
         /// Show status of global packs instead of current project
         #[arg(short = 'g', long)]
         global: bool,
     },
-    /// Install pack(s) into this project
+    /// Install pack(s) into this project (deprecated alias of `skm add [<pack>...]`)
+    #[command(hide = true)]
     Add {
         /// Pack names to install (leave empty for interactive selection)
         #[arg(value_name = "PACK")]
@@ -250,7 +263,8 @@ pub enum PackCommand {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Remove pack(s) from this project
+    /// Remove pack(s) from this project (deprecated alias of `skm remove [<pack>...] [--pack]`)
+    #[command(hide = true)]
     Remove {
         /// Pack names to remove
         #[arg(required = true, value_name = "PACK")]
@@ -315,7 +329,8 @@ pub enum StoreCommand {
     Show,
     /// Unregister the store
     Remove,
-    /// Scan the store for skills and report its layout
+    /// Scan the store for skills and report its layout (deprecated alias of `skm list --all`)
+    #[command(hide = true)]
     Scan,
 }
 
@@ -504,6 +519,7 @@ mod tests {
                 packs: false,
                 skills: false,
                 description: false,
+                all: false,
             }
         ));
         assert!(matches!(
@@ -512,6 +528,7 @@ mod tests {
                 packs: true,
                 skills: false,
                 description: false,
+                all: false,
             }
         ));
         assert!(matches!(
@@ -520,6 +537,7 @@ mod tests {
                 packs: false,
                 skills: true,
                 description: false,
+                all: false,
             }
         ));
         assert!(matches!(
@@ -528,6 +546,7 @@ mod tests {
                 packs: false,
                 skills: false,
                 description: true,
+                all: false,
             }
         ));
         assert!(matches!(
@@ -536,6 +555,7 @@ mod tests {
                 packs: false,
                 skills: false,
                 description: true,
+                all: false,
             }
         ));
         assert!(matches!(
@@ -544,6 +564,16 @@ mod tests {
                 packs: false,
                 skills: false,
                 description: true,
+                all: false,
+            }
+        ));
+        assert!(matches!(
+            parse(&["list", "--all"]).command,
+            Commands::List {
+                packs: false,
+                skills: false,
+                description: false,
+                all: true,
             }
         ));
         assert!(Cli::try_parse_from(["skm", "list", "--store", "main"]).is_err());

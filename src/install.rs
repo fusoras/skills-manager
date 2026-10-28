@@ -597,8 +597,10 @@ pub struct RemoveOptions {
     pub targets: Vec<String>,
     /// Delete copies that were modified.
     pub force: bool,
-    /// Whether `names` are pack names.
+    /// Force all `names` to be pack names (needed when a skill and a pack share a name).
     pub pack: bool,
+    /// Force all `names` to be individual skill names (needed when a skill and a pack share a name).
+    pub skill: bool,
 }
 
 /// One installed copy on disk.
@@ -636,7 +638,51 @@ pub struct RemoveBatchPlan {
     pub packs: Vec<String>,
 }
 
+/// Kind of a resolved `skm remove` name.
+enum RemoveKind {
+    /// The name refers to a pack.
+    Pack,
+    /// The name refers to an individual skill.
+    Skill,
+}
+
+/// Resolve one `skm remove` name against the project registry, then the store.
+///
+/// Registered names decide the kind; a name registered as both is ambiguous.
+/// A name registered as neither falls back to the store: a pack definition
+/// suggests the pack message, anything else the skill message.
+fn resolve_remove_kind(config: &Config, project: &Project, name: &str) -> Result<RemoveKind> {
+    let is_pack_registered = project.record.has_pack(name)
+        || project
+            .record
+            .skills
+            .iter()
+            .any(|s| s.packs.iter().any(|p| p == name));
+    let is_skill_registered = !project.record.get_all(name).is_empty();
+    match (is_pack_registered, is_skill_registered) {
+        (true, false) => Ok(RemoveKind::Pack),
+        (false, true) => Ok(RemoveKind::Skill),
+        (true, true) => bail!(
+            "'{name}' is registered both as a pack and as an individual skill in this project; \
+             pass '--pack' or '--skill' to disambiguate"
+        ),
+        (false, false) => {
+            let store_root = config.store_root()?;
+            let store_has_pack = pack::find_pack_file(&store_root, name)?.is_some()
+                || pack::pack_file(&store_root, name).is_file();
+            if store_has_pack {
+                bail!("pack '{name}' is not registered in this project");
+            }
+            bail!("skill '{name}' is not registered in this project");
+        }
+    }
+}
+
 /// Plan the removal of every named skill or pack, validating before any write.
+///
+/// Names are resolved automatically: a registered pack name is treated as a
+/// pack, a registered skill as a skill. `--pack` / `--skill` force a kind when
+/// the same name exists in both worlds.
 pub fn plan_remove(
     config: &Config,
     project: &Project,
@@ -645,191 +691,157 @@ pub fn plan_remove(
 ) -> Result<RemoveBatchPlan> {
     config.store_path()?;
     let root = project.root();
+
+    let mut pack_names: Vec<String> = Vec::new();
+    let mut skill_names: Vec<String> = Vec::new();
+    for name in names {
+        let kind = if options.pack {
+            RemoveKind::Pack
+        } else if options.skill {
+            RemoveKind::Skill
+        } else {
+            resolve_remove_kind(config, project, name)?
+        };
+        let bucket = match kind {
+            RemoveKind::Pack => &mut pack_names,
+            RemoveKind::Skill => &mut skill_names,
+        };
+        if !bucket.contains(name) {
+            bucket.push(name.clone());
+        }
+    }
+
     let mut plans = Vec::new();
     let mut recorded_packs = Vec::new();
 
-    if options.pack {
-        let mut packs_to_remove = Vec::new();
-        for pack_name in names {
-            let has_pack = project.record.has_pack(pack_name);
-            let has_skills = project
-                .record
-                .skills
-                .iter()
-                .any(|s| s.packs.iter().any(|p| p == pack_name));
-            if !has_pack && !has_skills {
-                bail!("pack '{pack_name}' is not registered in this project");
-            }
-            if !packs_to_remove.contains(pack_name) {
-                packs_to_remove.push(pack_name.clone());
-            }
+    if !pack_names.is_empty() {
+        plan_remove_packs(
+            project,
+            &pack_names,
+            options,
+            root,
+            &mut plans,
+            &mut recorded_packs,
+        )?;
+    }
+    if !skill_names.is_empty() {
+        plan_remove_skills(project, &skill_names, options, root, &mut plans)?;
+    }
+
+    Ok(RemoveBatchPlan {
+        plans,
+        packs: recorded_packs,
+    })
+}
+
+/// Plan the unlink of packs: every member skill is removed unless it is still
+/// referenced by another pack or by a direct install.
+#[allow(clippy::too_many_arguments)]
+fn plan_remove_packs(
+    project: &Project,
+    pack_names: &[String],
+    options: &RemoveOptions,
+    root: &Path,
+    plans: &mut Vec<RemovePlan>,
+    recorded_packs: &mut Vec<String>,
+) -> Result<()> {
+    let mut packs_to_remove = Vec::new();
+    for pack_name in pack_names {
+        let has_pack = project.record.has_pack(pack_name);
+        let has_skills = project
+            .record
+            .skills
+            .iter()
+            .any(|s| s.packs.iter().any(|p| p == pack_name));
+        if !has_pack && !has_skills {
+            bail!("pack '{pack_name}' is not registered in this project");
         }
-        recorded_packs = packs_to_remove.clone();
-
-        // Find all skills associated with ANY of packs_to_remove
-        let mut affected_skills: Vec<String> = Vec::new();
-        for skill_state in &project.record.skills {
-            if skill_state
-                .packs
-                .iter()
-                .any(|p| packs_to_remove.contains(p))
-                && !affected_skills.contains(&skill_state.name)
-            {
-                affected_skills.push(skill_state.name.clone());
-            }
+        if !packs_to_remove.contains(pack_name) {
+            packs_to_remove.push(pack_name.clone());
         }
-        affected_skills.sort();
+    }
+    *recorded_packs = packs_to_remove.clone();
 
-        for skill_name in affected_skills {
-            let mut entries = project.record.get_all(&skill_name);
-            if !options.targets.is_empty() {
-                entries.retain(|e| options.targets.contains(&e.target));
-            }
-            if entries.is_empty() {
-                continue;
-            }
+    // Find all skills associated with ANY of packs_to_remove
+    let mut affected_skills: Vec<String> = Vec::new();
+    for skill_state in &project.record.skills {
+        if skill_state
+            .packs
+            .iter()
+            .any(|p| packs_to_remove.contains(p))
+            && !affected_skills.contains(&skill_state.name)
+        {
+            affected_skills.push(skill_state.name.clone());
+        }
+    }
+    affected_skills.sort();
 
-            let mut copies = Vec::new();
-            for entry in &entries {
-                let dest_dir = installed_dir(root, &entry.target, &skill_name);
-                let dest_rel = if entry.target.starts_with('~') {
-                    format!("{}/{}", entry.target, skill_name)
-                } else {
-                    skill::relative_path(&dest_dir, root)
-                };
-                copies.push(InstalledCopy {
-                    target: entry.target.clone(),
-                    dest_rel,
-                    dest_dir,
-                });
-            }
+    for skill_name in affected_skills {
+        let mut entries = project.record.get_all(&skill_name);
+        if !options.targets.is_empty() {
+            entries.retain(|e| options.targets.contains(&e.target));
+        }
+        if entries.is_empty() {
+            continue;
+        }
 
-            let mut any_direct = false;
-            let mut remaining_packs: Vec<String> = Vec::new();
-            for entry in &entries {
-                if entry.direct {
-                    any_direct = true;
-                }
-                for p in &entry.packs {
-                    if !packs_to_remove.contains(p) && !remaining_packs.contains(p) {
-                        remaining_packs.push(p.clone());
-                    }
-                }
-            }
-            remaining_packs.sort();
-
-            if any_direct || !remaining_packs.is_empty() {
-                let reason = if any_direct {
-                    "still required by direct install".to_owned()
-                } else {
-                    format!("still required by pack '{}'", remaining_packs.join("', '"))
-                };
-                plans.push(RemovePlan {
-                    skill: skill_name,
-                    copies,
-                    action: RemoveAction::Retain { reason },
-                    new_direct: None,
-                    remaining_packs: Some(remaining_packs),
-                });
+        let mut copies = Vec::new();
+        for entry in &entries {
+            let dest_dir = installed_dir(root, &entry.target, &skill_name);
+            let dest_rel = if entry.target.starts_with('~') {
+                format!("{}/{}", entry.target, skill_name)
             } else {
-                for copy in &copies {
-                    if copy.dest_dir.is_dir() {
-                        let entry = entries.iter().find(|e| e.target == copy.target).unwrap();
-                        let current = hash::tree_hash(&copy.dest_dir)?;
-                        if current != entry.written_hash && !options.force {
-                            bail!(
-                                "skill '{skill_name}' was modified in {}; pass --force to delete it anyway",
-                                copy.dest_rel
-                            );
-                        }
-                    }
+                skill::relative_path(&dest_dir, root)
+            };
+            copies.push(InstalledCopy {
+                target: entry.target.clone(),
+                dest_rel,
+                dest_dir,
+            });
+        }
+
+        let mut any_direct = false;
+        let mut remaining_packs: Vec<String> = Vec::new();
+        for entry in &entries {
+            if entry.direct {
+                any_direct = true;
+            }
+            for p in &entry.packs {
+                if !packs_to_remove.contains(p) && !remaining_packs.contains(p) {
+                    remaining_packs.push(p.clone());
                 }
-                plans.push(RemovePlan {
-                    skill: skill_name,
-                    copies,
-                    action: RemoveAction::Remove,
-                    new_direct: None,
-                    remaining_packs: None,
-                });
             }
         }
-    } else {
-        let mut seen: Vec<&str> = Vec::new();
-        for name in names {
-            if seen.contains(&name.as_str()) {
-                continue;
-            }
-            seen.push(name);
+        remaining_packs.sort();
 
-            let mut entries = project.record.get_all(name);
-            if !options.targets.is_empty() {
-                entries.retain(|e| options.targets.contains(&e.target));
-            }
-
-            if entries.is_empty() {
-                bail!("skill '{name}' is not registered in this project");
-            }
-
-            let mut copies = Vec::new();
-            for entry in &entries {
-                let dest_dir = installed_dir(root, &entry.target, name);
-                let dest_rel = if entry.target.starts_with('~') {
-                    format!("{}/{}", entry.target, name)
-                } else {
-                    skill::relative_path(&dest_dir, root)
-                };
-                copies.push(InstalledCopy {
-                    target: entry.target.clone(),
-                    dest_rel,
-                    dest_dir,
-                });
-            }
-
-            let mut all_packs: Vec<String> = Vec::new();
-            for entry in &entries {
-                for p in &entry.packs {
-                    if !all_packs.contains(p) {
-                        all_packs.push(p.clone());
-                    }
-                }
-            }
-
-            if !all_packs.is_empty() && !options.force {
-                let any_direct = entries.iter().any(|e| e.direct);
-                if any_direct {
-                    let reason = format!("still required by pack '{}'", all_packs.join("', '"));
-                    plans.push(RemovePlan {
-                        skill: name.clone(),
-                        copies,
-                        action: RemoveAction::Retain { reason },
-                        new_direct: Some(false),
-                        remaining_packs: None,
-                    });
-                    continue;
-                } else {
-                    bail!(
-                        "skill '{name}' is part of pack '{}'; pass --force to delete it anyway or run `skm pack remove {}`",
-                        all_packs.join("', '"),
-                        all_packs[0]
-                    );
-                }
-            }
-
+        if any_direct || !remaining_packs.is_empty() {
+            let reason = if any_direct {
+                "still required by direct install".to_owned()
+            } else {
+                format!("still required by pack '{}'", remaining_packs.join("', '"))
+            };
+            plans.push(RemovePlan {
+                skill: skill_name,
+                copies,
+                action: RemoveAction::Retain { reason },
+                new_direct: None,
+                remaining_packs: Some(remaining_packs),
+            });
+        } else {
             for copy in &copies {
                 if copy.dest_dir.is_dir() {
                     let entry = entries.iter().find(|e| e.target == copy.target).unwrap();
                     let current = hash::tree_hash(&copy.dest_dir)?;
                     if current != entry.written_hash && !options.force {
                         bail!(
-                            "skill '{name}' was modified in {}; pass --force to delete it anyway",
+                            "skill '{skill_name}' was modified in {}; pass --force to delete it anyway",
                             copy.dest_rel
                         );
                     }
                 }
             }
-
             plans.push(RemovePlan {
-                skill: name.clone(),
+                skill: skill_name,
                 copies,
                 action: RemoveAction::Remove,
                 new_direct: None,
@@ -838,10 +850,101 @@ pub fn plan_remove(
         }
     }
 
-    Ok(RemoveBatchPlan {
-        plans,
-        packs: recorded_packs,
-    })
+    Ok(())
+}
+
+/// Plan the removal of individual skills, refusing to delete copies that are
+/// still needed by a pack or by a direct install.
+fn plan_remove_skills(
+    project: &Project,
+    names: &[String],
+    options: &RemoveOptions,
+    root: &Path,
+    plans: &mut Vec<RemovePlan>,
+) -> Result<()> {
+    let mut seen: Vec<&str> = Vec::new();
+    for name in names {
+        if seen.contains(&name.as_str()) {
+            continue;
+        }
+        seen.push(name);
+
+        let mut entries = project.record.get_all(name);
+        if !options.targets.is_empty() {
+            entries.retain(|e| options.targets.contains(&e.target));
+        }
+
+        if entries.is_empty() {
+            bail!("skill '{name}' is not registered in this project");
+        }
+
+        let mut copies = Vec::new();
+        for entry in &entries {
+            let dest_dir = installed_dir(root, &entry.target, name);
+            let dest_rel = if entry.target.starts_with('~') {
+                format!("{}/{}", entry.target, name)
+            } else {
+                skill::relative_path(&dest_dir, root)
+            };
+            copies.push(InstalledCopy {
+                target: entry.target.clone(),
+                dest_rel,
+                dest_dir,
+            });
+        }
+
+        let mut all_packs: Vec<String> = Vec::new();
+        for entry in &entries {
+            for p in &entry.packs {
+                if !all_packs.contains(p) {
+                    all_packs.push(p.clone());
+                }
+            }
+        }
+
+        if !all_packs.is_empty() && !options.force {
+            let any_direct = entries.iter().any(|e| e.direct);
+            if any_direct {
+                let reason = format!("still required by pack '{}'", all_packs.join("', '"));
+                plans.push(RemovePlan {
+                    skill: name.clone(),
+                    copies,
+                    action: RemoveAction::Retain { reason },
+                    new_direct: Some(false),
+                    remaining_packs: None,
+                });
+                continue;
+            }
+            bail!(
+                "skill '{name}' is part of pack '{}'; pass --force to delete it anyway or run `skm remove {} --pack`",
+                all_packs.join("', '"),
+                all_packs[0]
+            );
+        }
+
+        for copy in &copies {
+            if copy.dest_dir.is_dir() {
+                let entry = entries.iter().find(|e| e.target == copy.target).unwrap();
+                let current = hash::tree_hash(&copy.dest_dir)?;
+                if current != entry.written_hash && !options.force {
+                    bail!(
+                        "skill '{name}' was modified in {}; pass --force to delete it anyway",
+                        copy.dest_rel
+                    );
+                }
+            }
+        }
+
+        plans.push(RemovePlan {
+            skill: name.clone(),
+            copies,
+            action: RemoveAction::Remove,
+            new_direct: None,
+            remaining_packs: None,
+        });
+    }
+
+    Ok(())
 }
 
 /// Delete every planned copy or unlink pack references in the central registry.

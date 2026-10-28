@@ -39,7 +39,7 @@ skills = [
 
 3. Verify that `skm` detects it:
    ```sh
-   skm pack list
+   skm list --packs
    skm pack show web
    ```
 
@@ -77,18 +77,19 @@ If the pack does not exist yet, an initial template is created automatically bef
 
 ## Installing Packs
 
+Packs install with the same `skm add` command used for individual skills: the
+name is resolved automatically against the store (`packs/*.toml` first).
+
 Install all skills in a pack into the default target (`.agents/skills`):
 ```sh
-skm add --pack web
-# or:
-skm pack add web
+skm add web
 ```
 
 ### Multi-Agent Targets
 
 You can install packs into multiple agent environments simultaneously using target flags:
 ```sh
-skm pack add web --opencode --pi --claude
+skm add web --opencode --pi --claude
 ```
 Available flags:
 - `--agent` (or `--agents`): `.agents/skills` (**default**)
@@ -101,9 +102,7 @@ Available flags:
 
 Updating a project after adding skills to a pack in the store:
 ```sh
-skm add --pack web
-# or simply run:
-skm pack add web
+skm add web
 ```
 
 ---
@@ -119,7 +118,7 @@ Pack B: [beta, gamma]
 
 - When removing Pack A:
   ```sh
-  skm pack remove A
+  skm remove A
   ```
   - `alpha` is deleted from disk and unregistered.
   - `beta` is **retained** because Pack B still requires it:
@@ -138,20 +137,28 @@ Pack B: [beta, gamma]
 If you edit a skill installed via a pack locally inside your project:
 1. Running `skm sync` detects the local modifications and detaches the skill as a local fork (`detached = true`).
 2. The skill is preserved untouched and never overwritten by subsequent syncs.
-3. The pack association is **not lost** (`skm pack status` still tracks the pack).
-4. Running `skm pack remove` will refuse to delete the locally modified copy unless `--force` is explicitly provided.
+3. The pack association is **not lost** (`skm status --packs` still tracks the pack).
+4. Running `skm remove <pack>` will refuse to delete the locally modified copy unless `--force` is explicitly provided.
 
 ---
 
 ## Commands Summary
 
+`skm add` and `skm remove` resolve names automatically: a name found in
+`<store>/packs/` installs/removes a pack, anything else an individual skill.
+When a skill and a pack share a name, disambiguate with `--pack` or `--skill`.
+The old `skm pack add` / `skm pack remove` / `skm pack list` / `skm pack
+status` forms remain as hidden deprecated aliases of their `skm add`, `skm
+remove`, `skm list --packs` and `skm status --packs` equivalents.
+
 | Command | Description |
 | --- | --- |
-| `skm pack [list]` / `skm list --packs` | List all available packs in the store |
+| `skm add <pack>... [agent flags] [--pin] [--force] [--dry-run]` | Install a pack (auto-resolved name) |
+| `skm add --pack <name>...` | Force pack interpretation |
+| `skm remove <pack>... [agent flags] [--force] [--dry-run]` | Remove a pack with reference counting |
+| `skm list --packs` | List all available packs in the store |
 | `skm pack show <name>` | Inspect pack description and member skills |
 | `skm pack edit <name>` | Open pack in `$EDITOR` (or `$VISUAL`) |
 | `skm pack edit <name> --add <skills>...` | Add skills directly from CLI |
 | `skm pack edit <name> --remove <skills>...` | Remove skills directly from CLI |
-| `skm pack status` / `skm status --packs` | Show installed packs in the current project |
-| `skm pack add <pack>... [flags]` | Install packs into target project |
-| `skm pack remove <pack>... [flags]` | Remove packs with reference counting |
+| `skm status --packs` | Show installed packs in the current project |

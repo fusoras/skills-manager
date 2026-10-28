@@ -65,7 +65,7 @@ pub fn select_items(config: &Config) -> Result<Vec<crate::install::InstallItem>>
     let packs = pack::list(&store_root).unwrap_or_default();
 
     if report.skills.is_empty() && packs.is_empty() {
-        bail!("no skills or packs found in the store; run `skm store scan` to inspect your store");
+        bail!("no skills or packs found in the store; run `skm list --all` to inspect your store");
     }
 
     let mut choices = Vec::new();
@@ -125,7 +125,7 @@ pub fn select_skills(config: &Config) -> Result<Vec<String>> {
         bail!("{}", report.warnings.join("; "));
     }
     if report.skills.is_empty() {
-        bail!("no skills found in the store; run `skm store scan` to inspect your store");
+        bail!("no skills found in the store; run `skm list --all` to inspect your store");
     }
 
     let skills: Vec<String> = report.skills.into_iter().map(|s| s.name).collect();

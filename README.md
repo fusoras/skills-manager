@@ -27,13 +27,12 @@ cargo install --path .
 ```sh
 skm store add ~/skills-store   # register the folder that holds your skills
 skm store                      # where it is, whether it is readable, its layout
-skm store scan                 # what the store offers
-skm list                       # skills available in the store
 
-skm add git-commit             # copy a skill into this project
+skm add git-commit             # copy a skill into this project (a pack name works too)
 skm add seo --pin              # --pin: sync will never update it
 skm status                     # ok | behind | modified | pinned | ...
 skm sync                       # reconcile the project with the store
+skm list --all                 # full store report: skills, packs, layout, warnings
 ```
 
 ## Configuration
@@ -54,17 +53,13 @@ For complete details on store normalization, default targets, agent overrides, a
 | `skm store add <path> [--create]`                                         | Register the store; `--create` creates a missing directory |
 | `skm store` / `skm store show`                                            | The registered store: path, state, layout and skill count  |
 | `skm store remove`                                                        | Unregister the store (the directory is never touched)      |
-| `skm store scan`                                                          | Full scan of the store: skills, packs and warnings         |
-| `skm list [--packs] [--desc]`                                              | Skills (with optional description) or packs in store        |
-| `skm pack [list]`                                                         | List available packs in the store                          |
-| `skm pack show <name>`                                                    | Details of a pack (skills, description)                    |
-| `skm pack edit <name> [--add <skill>...] [--remove <skill>...]`           | Open pack in $EDITOR or add/remove skills directly via CLI |
-| `skm pack status`                                                         | State of packs installed in this project                   |
-| `skm pack add [<pack>...] [-i] [agent flags] [--pin] [--force] [--dry-run]`| Install packs into this project (interactive picker if empty) |
-| `skm pack remove <pack>... [agent flags] [--force] [--dry-run]`           | Remove packs with reference counting                       |
+| `skm store scan`                                                          | (deprecated alias of `skm list --all`)                     |
+| `skm list [--packs] [--skills] [--desc] [--all]`                           | Skills or packs in store; `--all` prints the full store report |
+| `skm pack show <name>`                                                    | Details of a pack (skills, description)                       |
+| `skm pack edit <name> [--add <skill>...] [--remove <skill>...]`           | Open pack in $EDITOR or add/remove skills directly via CLI    |
 | `skm projects`                                                            | List all managed projects on this machine                  |
-| `skm add [<skill>...] [-i] [--pack] [agent flags] [--pin] [--force] [--dry-run]` | Copy skills into targets (interactive picker if empty)    |
-| `skm remove <skill>... [--pack] [agent flags] [--force] [--dry-run]`      | Delete copies or unlink packs with reference counting      |
+| `skm add [<name>...] [-i] [--pack\|--skill] [agent flags] [--pin] [--force] [--dry-run]` | Install skills or packs (names auto-resolved; interactive picker if empty) |
+| `skm remove <name>... [--pack\|--skill] [agent flags] [--force] [--dry-run]` | Delete copies or unregister packs with reference counting (names auto-resolved) |
 | `skm status [-p\|--project] [-g\|--global] [--packs]`                      | Unified visual status of project and global skills         |
 | `skm sync [<skill>...] [--to-store] [-g\|--global] [--force] [--dry-run]` | Reconcile project with the store (or push edits back with `--to-store`) |
 | `skm rule [list]`                                                         | List rules and instruction files available in store        |
@@ -74,7 +69,7 @@ For complete details on store normalization, default targets, agent overrides, a
 | `skm rule status [-p\|--project] [-g\|--global]`                          | State of applied rules (ok, modified, behind, missing)    |
 | `skm rule remove <name> [-g] [agent flags] [--file <path>] [--dry-run]`    | Non-destructively remove managed rule block from target     |
 
-`skm list` prints the skills available in the store. Passing `--desc` (or `-d` / `--description`) includes the skill description dimmed in gray, truncated dynamically with an ellipsis (`...`) to adapt to the terminal width without hiding the first word.
+`skm list` prints the skills available in the store. Passing `--desc` (or `-d` / `--description`) includes the skill description dimmed in gray, truncated dynamically with an ellipsis (`...`) to adapt to the terminal width without hiding the first word. `--all` prints the full store report (path, state, layout, every skill, the number of `*.toml` packs and any warnings); `--packs` lists only the packs.
 
 `skm store add <path>` registers one path: the same path (compared after `~`
 expansion, so two spellings of one directory are one store) is a no-op and
@@ -97,7 +92,7 @@ error: no store registered; run `skm store add <path>`
   and `packs/` are ignored.
 
 A skill's name is the `name:` field of the `SKILL.md` frontmatter, falling back
-to the directory name. `skm store scan` reports skills, the number of `*.toml`
+to the directory name. `skm list --all` reports skills, the number of `*.toml`
 pack definitions in `packs/`, and warnings for directories without `SKILL.md`
 and for frontmatter names that do not match their directory.
 
@@ -136,7 +131,7 @@ If no agent flags were specified on the command line, `skm` then presents a mult
 [Press <space> to toggle, <a> to toggle all, <enter> to confirm]
 ```
 
-(The same interactive selection is available for packs with `skm pack add -i` or `skm add --pack -i`).
+(The same interactive picker already lists skills and packs together; run `skm add -i`, or only packs with `skm add --pack -i`).
 
 Targets are chosen via agent flags:
 
@@ -213,9 +208,10 @@ $ skm projects
 
 Packs are named collections of skills that install together from `<store>/packs/<name>.toml`. Target projects remain 100% clean (zero metadata files).
 
-- **Install**: `skm add --pack frontend` or `skm pack add frontend`
-- **Inspect**: `skm pack list` and `skm pack show <name>`
+- **Install**: `skm add frontend` (force the pack kind when a name collides: `skm add --pack frontend`)
+- **Inspect**: `skm list --packs` and `skm pack show <name>`
 - **Edit**: `skm pack edit <name> [--add <skill>...] [--remove <skill>...]` or via `$EDITOR`
+- **Remove**: `skm remove frontend` (or `skm remove --pack frontend`)
 - **Reference counting**: Shared skills are safely retained until all referencing packs are removed.
 
 For the complete guide on pack definitions, CLI editing, multi-target installation, reference counting, and local detach safety, see the [Packs Documentation](docs/pack.md).

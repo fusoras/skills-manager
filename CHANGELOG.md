@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Command surface unified:
+  - `skm pack` now only keeps `show` and `edit` as first-class actions; `pack add`, `pack remove`, `pack list` and `pack status` became hidden deprecated aliases of `skm add`, `skm remove`, `skm list --packs` and `skm status --packs` (a deprecation notice is printed on stderr).
+  - `skm add` and `skm remove` resolve names automatically: mixing skills and packs in the same command works without `--pack`; when a skill and a pack share a name, `--pack` / `--skill` disambiguate (same rule as before).
+  - Added `--skill` flag to `skm remove` to force individual-skill interpretation.
+  - `skm store scan` is now a hidden deprecated alias of `skm list --all`.
+
 ### Added
+
+- Added `skm list --all`: full store report (path, state, layout, skills, packs and warnings), replacing `skm store scan` as the canonical full-scan command.
 
 - Added `skm rule` command suite for non-destructive management, injection, and synchronization of `AGENTS.md` and agent instructions (`GEMINI.md`, `CLAUDE.md`, etc.).
   - Default rule resolution: defaults to `<store>/AGENTS.md` when no rule name is passed to `skm rule apply`.

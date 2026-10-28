@@ -72,7 +72,7 @@ debounce_ms = 500
 ### `default_target`
 - **Type**: `string`
 - **Default**: `".agents/skills"`
-- **Description**: The default relative directory inside any target project where `skm add`, `skm pack add`, and `skm sync` install skills when no explicit agent target flags are provided.
+- **Description**: The default relative directory inside any target project where `skm add` and `skm sync` install skills when no explicit agent target flags are provided.
 
 ### `default_global_target`
 - **Type**: `string`

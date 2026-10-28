@@ -49,7 +49,8 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
             packs,
             skills,
             description,
-        } => list_cmd(out, packs, skills, description),
+            all,
+        } => list_cmd(out, packs, skills, description, all),
         Commands::Add {
             skills,
             interactive,
@@ -170,6 +171,7 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
         Commands::Remove {
             skills,
             pack,
+            skill,
             global,
             agent,
             antigravity,
@@ -204,6 +206,7 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
                     targets,
                     force,
                     pack,
+                    skill,
                 },
                 global,
                 dry_run,
@@ -233,13 +236,25 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
     }
 }
 
+/// Notify on stderr that a hidden deprecated command path was used.
+fn warn_deprecated(note: &str) {
+    eprintln!("note: {note}");
+}
+
 fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
-    match action.unwrap_or(PackCommand::List) {
-        PackCommand::List => list_packs(out),
-        PackCommand::Show { name } => pack_show(out, &name),
-        PackCommand::Edit { name, add, remove } => pack_edit(out, &name, &add, &remove),
-        PackCommand::Status { global } => pack_status(out, global),
-        PackCommand::Add {
+    match action {
+        None => list_packs(out),
+        Some(PackCommand::List) => {
+            warn_deprecated("`skm pack list` is deprecated; use `skm list --packs`");
+            list_packs(out)
+        }
+        Some(PackCommand::Show { name }) => pack_show(out, &name),
+        Some(PackCommand::Edit { name, add, remove }) => pack_edit(out, &name, &add, &remove),
+        Some(PackCommand::Status { global }) => {
+            warn_deprecated("`skm pack status` is deprecated; use `skm status --packs`");
+            pack_status(out, global)
+        }
+        Some(PackCommand::Add {
             packs,
             interactive,
             global,
@@ -254,7 +269,8 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
             pin,
             force,
             dry_run,
-        } => {
+        }) => {
+            warn_deprecated("`skm pack add` is deprecated; use `skm add [<pack>...]`");
             let config = config::load()?;
             let is_interactive =
                 interactive || (packs.is_empty() && std::io::stdin().is_terminal());
@@ -333,7 +349,7 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
                 dry_run,
             )
         }
-        PackCommand::Remove {
+        Some(PackCommand::Remove {
             packs,
             global,
             agent,
@@ -346,7 +362,8 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
             dir,
             force,
             dry_run,
-        } => {
+        }) => {
+            warn_deprecated("`skm pack remove` is deprecated; use `skm remove [<pack>...] --pack`");
             let config = config::load()?;
             let targets = install::resolve_remove_targets(
                 &config,
@@ -369,6 +386,7 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
                     targets,
                     force,
                     pack: true,
+                    skill: false,
                 },
                 global,
                 dry_run,
@@ -772,6 +790,12 @@ fn store_show(out: &mut Printer) -> Result<()> {
 }
 
 fn store_scan(out: &mut Printer) -> Result<()> {
+    warn_deprecated("`skm store scan` is deprecated; use `skm list --all`");
+    list_all(out)
+}
+
+/// `skm list --all`: the full store report — state, layout, skills, packs and warnings.
+fn list_all(out: &mut Printer) -> Result<()> {
     let config = config::load()?;
     render_report(out, &store::scan(config.store_path()?)?)
 }
@@ -804,7 +828,16 @@ fn render_report(out: &mut Printer, report: &ScanReport) -> Result<()> {
     Ok(())
 }
 
-fn list_cmd(out: &mut Printer, packs_only: bool, skills_only: bool, show_desc: bool) -> Result<()> {
+fn list_cmd(
+    out: &mut Printer,
+    packs_only: bool,
+    skills_only: bool,
+    show_desc: bool,
+    all: bool,
+) -> Result<()> {
+    if all {
+        return list_all(out);
+    }
     if packs_only {
         return list_packs(out);
     }

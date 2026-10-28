@@ -9,10 +9,10 @@ what exists today; this file keeps what is still missing.
 - The store is **global and unique**: one directory per machine, registered by path.
 - **Zero-pollution architecture**: target projects contain NO `skills.toml`, NO `.skills-manager/` directory, and require NO `.gitignore` changes. All project metadata, targets, pins, tree hashes, and detached tombstones live centrally in `~/.local/state/skm/projects.toml`.
 - Added `skm projects` command to list all managed projects on the machine.
-- **Packs (M3)**: named collections in `<store>/packs/<name>.toml` installing together with reference counting and automatic detach of local modifications. Supported via `skm pack [list|show|edit|status|add|remove]` and flags `--pack` / `--packs`.
+- **Packs (M3)**: named collections in `<store>/packs/<name>.toml` installing together with reference counting and automatic detach of local modifications. Installed/removed through the unified `skm add` / `skm remove` (names resolve against skills and packs; `--pack` / `--skill` disambiguate) and inspected with `skm list --packs` / `skm status --packs`. `skm pack` keeps only `show` and `edit`; `pack add/remove/list/status` survive as hidden deprecated aliases.
 - **Global Agent Skills**: `--global` (`-g`) flag to install, remove, inspect (`status`), and `sync` user-level skills across agents: Antigravity CLI (`~/.gemini/skills`, `--agy`), OpenCode (`~/.config/opencode/skills`), Pi (`~/.pi/agent/skills`), Claude (`~/.claude/skills`), Codex, and Cursor. Agent-targeted removal (`skm remove <skill> --global --<agent>`) safely deletes skills per agent without touching others.
 - **Interactive UX & Unified Status**:
-  - Interactive multi-select picker (`inquire`) launched when `skm add` or `skm pack add` is run without skill arguments in a terminal or with `-i` / `--interactive`.
+  - Interactive multi-select picker (`inquire`) launched when `skm add` is run without skill arguments in a terminal or with `-i` / `--interactive`; it lists packs and skills together (`--pack` limits the picker to packs).
   - Unified visual status view (`skm status`): displays both current project and global agent skills, scoped via `-p` / `--project` and `-g` / `--global`, with clear unicode icons (`✔ ok`, `✎ modified`, `↓ behind`, `⚑ pinned`, `✖ missing`, `? unmanaged`, `⤹ detached`, `○ skipped`).
 - **Upstream Sync (`--to-store`)**:
   - `skm sync --to-store` and `skm sync <skill> --to-store` push locally modified or detached copies back to the store, clearing detached tombstones and restoring status to `ok`.
@@ -60,7 +60,7 @@ what exists today; this file keeps what is still missing.
   path (after `~` expansion) is a no-op; another path replaces the current one.
 * Without a registered store, `status` and `sync` report every entry as
   `skipped (no store registered)`, write nothing and exit 0; `add`, `remove`,
-  `list`, `store`/`store show` and `store scan` fail with
+  `list`, `store`/`store show` and `list --all` fail with
   ``no store registered; run `skm store add <path>` ``.
 * Old configuration formats are rejected with a hint: a config with `[stores]`
   or `default_store` fails with `old config format`.

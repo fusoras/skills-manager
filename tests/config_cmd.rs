@@ -100,12 +100,17 @@ fn help_works_without_touching_the_config() {
     }
 
     let store_help = stdout_of(sandbox.skm().args(["store", "--help"]));
-    for action in ["add", "show", "remove", "scan"] {
+    for action in ["add", "show", "remove"] {
         assert!(
             store_help.contains(action),
             "store help misses {action}: {store_help}"
         );
     }
+    // `store scan` is a hidden deprecated alias of `skm list --all`.
+    assert!(
+        !store_help.contains("scan"),
+        "store scan must stay hidden: {store_help}"
+    );
 
     assert!(!sandbox.config_file().exists(), "--help created the config");
 }

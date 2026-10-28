@@ -97,8 +97,8 @@ fn pack_add_installs_all_member_skills_and_keeps_project_clean() {
     assert!(project.join(".agents/skills/beta/SKILL.md").exists());
     assert_clean_project(&project);
 
-    // Verify `skm pack status`
-    let status_out = stdout_of(sandbox.skm_in(&project).args(["pack", "status"]));
+    // Verify `skm status --packs`
+    let status_out = stdout_of(sandbox.skm_in(&project).args(["status", "--packs"]));
     assert_eq!(
         table_cells(&status_out),
         rows(&[
@@ -120,11 +120,19 @@ fn pack_add_installs_all_member_skills_and_keeps_project_clean() {
 }
 
 #[test]
-fn pack_add_via_pack_subcommand() {
+fn pack_add_via_pack_subcommand_is_a_deprecated_alias() {
     let (sandbox, _store, project) = ready();
 
-    // Install pack using `skm pack add fullstack`
-    let output = stdout_of(sandbox.skm_in(&project).args(["pack", "add", "fullstack"]));
+    // Install pack using `skm pack add fullstack` (kept as a hidden alias)
+    let assert = sandbox
+        .skm_in(&project)
+        .args(["pack", "add", "fullstack"])
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+    assert!(stderr.contains("deprecated"), "{stderr}");
+    assert!(stderr.contains("`skm add [<pack>...]`"), "{stderr}");
+    let output = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
     assert!(output.contains("Installed beta -> .agents/skills/beta"));
     assert!(output.contains("Installed gamma -> .agents/skills/gamma"));
 
@@ -286,7 +294,7 @@ fn pack_locally_modified_member_detaches_during_sync_without_dropping_pack() {
     assert!(status_out.contains("detached"));
 
     // Pack status still lists the pack!
-    let pack_status = stdout_of(sandbox.skm_in(&project).args(["pack", "status"]));
+    let pack_status = stdout_of(sandbox.skm_in(&project).args(["status", "--packs"]));
     assert!(pack_status.contains("frontend"));
 
     // Removing the pack without --force refuses to delete modified alpha
@@ -407,7 +415,7 @@ fn pack_add_without_pack_flag_auto_detects_pack() {
     assert_clean_project(&project);
 
     // Verify pack status reflects frontend is installed
-    let status_out = stdout_of(sandbox.skm_in(&project).args(["pack", "status"]));
+    let status_out = stdout_of(sandbox.skm_in(&project).args(["status", "--packs"]));
     assert_eq!(
         table_cells(&status_out),
         rows(&[
@@ -427,7 +435,7 @@ fn add_mixed_pack_and_skill_without_flags() {
     assert!(output.contains("Installed beta -> .agents/skills/beta"));
     assert!(output.contains("Installed gamma -> .agents/skills/gamma"));
 
-    let status_out = stdout_of(sandbox.skm_in(&project).args(["pack", "status"]));
+    let status_out = stdout_of(sandbox.skm_in(&project).args(["status", "--packs"]));
     assert_eq!(
         table_cells(&status_out),
         rows(&[
@@ -515,7 +523,7 @@ skills = ["alpha"]
     sandbox.register_store(&store);
     assert_eq!(sandbox.config_text().trim(), "store = \"~/skills-store\"");
 
-    let output = stdout_of(sandbox.skm().args(["pack", "list"]));
+    let output = stdout_of(sandbox.skm().args(["list", "--packs"]));
     assert!(
         output.contains("frontend"),
         "expected pack 'frontend' to be listed, got: {output}"
@@ -527,7 +535,7 @@ skills = ["alpha"]
         "expected pack details, got: {output_show}"
     );
 
-    // skm list --packs
+    // `skm list --packs`
     let output_list_packs = stdout_of(sandbox.skm().args(["list", "--packs"]));
     assert!(
         output_list_packs.contains("frontend"),
@@ -546,4 +554,74 @@ skills = ["alpha"]
     let output_add = stdout_of(sandbox.skm_in(&project).args(["add", "frontend"]));
     assert!(output_add.contains("Installed alpha -> .agents/skills/alpha"));
     assert!(project.join(".agents/skills/alpha/SKILL.md").exists());
+}
+
+/// `skm remove` resolves each name: packs and individual skills can be mixed.
+#[test]
+fn remove_auto_resolves_mixed_pack_and_skill_names() {
+    let (sandbox, _store, project) = ready();
+
+    // frontend is a pack (alpha, beta); gamma is an individual skill
+    stdout_of(sandbox.skm_in(&project).args(["add", "frontend", "gamma"]));
+    assert!(project.join(".agents/skills/gamma/SKILL.md").exists());
+
+    let output = stdout_of(
+        sandbox
+            .skm_in(&project)
+            .args(["remove", "frontend", "gamma"]),
+    );
+    assert!(output.contains("Removed alpha ("));
+    assert!(output.contains("Removed beta ("));
+    assert!(output.contains("Removed gamma ("), "{output}");
+    assert_clean_project(&project);
+
+    // Pack record removed from the central registry too
+    let status_out = stdout_of(sandbox.skm_in(&project).args(["status", "--packs"]));
+    assert!(status_out.contains("No packs registered"), "{status_out}");
+}
+
+/// A name not registered in the project falls back to the store to hint the intent.
+#[test]
+fn remove_auto_resolves_an_unregistered_pack_by_store_hint() {
+    let (sandbox, _store, project) = ready();
+
+    let (stdout, stderr) = failure_of(sandbox.skm_in(&project).args(["remove", "frontend"]));
+    assert!(stdout.is_empty());
+    assert!(
+        stderr.contains("pack 'frontend' is not registered in this project"),
+        "{stderr}"
+    );
+    assert_clean_project(&project);
+}
+
+/// `--pack` keeps forcing the pack kind for every name.
+#[test]
+fn remove_pack_flag_still_forces_pack_names() {
+    let (sandbox, _store, project) = ready();
+
+    stdout_of(sandbox.skm_in(&project).args(["add", "frontend", "gamma"]));
+
+    // With `--pack`, gamma is mandatory interpreted as a pack → refused
+    let (stdout, stderr) = failure_of(
+        sandbox
+            .skm_in(&project)
+            .args(["remove", "frontend", "gamma", "--pack"]),
+    );
+    assert!(stdout.is_empty());
+    assert!(
+        stderr.contains("pack 'gamma' is not registered in this project"),
+        "{stderr}"
+    );
+
+    // ...explicitly asking for the skill name still works via --skill
+    let (stdout_skill, stderr_skill) = failure_of(
+        sandbox
+            .skm_in(&project)
+            .args(["remove", "frontend", "alpha", "--pack"]),
+    );
+    assert!(stdout_skill.is_empty());
+    assert!(
+        stderr_skill.contains("pack 'alpha' is not registered in this project"),
+        "{stderr_skill}"
+    );
 }
