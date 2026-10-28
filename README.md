@@ -299,3 +299,4 @@ skm sync git-commit              # sync only git-commit from store to project
 - [Configuration](docs/configuration.md) — Global configuration file structure and settings reference.
 - [Tree Hash](docs/hash.md) — BLAKE3 canonical tree hashing, deterministic ordering, and exclusion rules.
 - [Packs](docs/pack.md) — Named skill collections, multi-target installation, CLI editing, and reference counting.
+- [Sync & Store Push](docs/sync.md) — Reconciliation, auto-detach, upstream push (`--to-store`), and conflict safety.
