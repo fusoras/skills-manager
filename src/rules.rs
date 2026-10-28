@@ -50,11 +50,12 @@ pub struct RuleTargetFlags {
     pub claude: bool,
     pub opencode: bool,
     pub cursor: bool,
+    pub pi: bool,
 }
 
 impl RuleTargetFlags {
     pub fn any_agent(self) -> bool {
-        self.antigravity || self.claude || self.opencode || self.cursor || self.agent
+        self.antigravity || self.claude || self.opencode || self.cursor || self.pi || self.agent
     }
 }
 
@@ -501,6 +502,9 @@ pub fn resolve_rule_targets(
         if flags.cursor {
             targets.push(store::expand_tilde("~/.cursor/AGENTS.md"));
         }
+        if flags.pi {
+            targets.push(store::expand_tilde("~/.pi/agent/AGENTS.md"));
+        }
 
         if !targets.is_empty() {
             return Ok(targets);
@@ -512,7 +516,7 @@ pub fn resolve_rule_targets(
         }
 
         bail!(
-            "--global requires specifying a target agent (--agy, --claude, --opencode, --cursor) or --file <path>"
+            "--global requires specifying a target agent (--agy, --claude, --opencode, --cursor, --pi) or --file <path>"
         );
     }
 
@@ -535,6 +539,9 @@ pub fn resolve_rule_targets(
         }
         if flags.cursor {
             targets.push(root.join(".cursor").join(store::AGENTS_FILE));
+        }
+        if flags.pi {
+            targets.push(root.join(".pi").join(store::AGENTS_FILE));
         }
         return Ok(targets);
     }

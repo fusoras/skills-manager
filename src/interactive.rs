@@ -273,6 +273,11 @@ pub fn select_rule_targets_global() -> Result<Vec<std::path::PathBuf>> {
             is_custom: false,
         },
         RuleAgentChoice {
+            name: "pi",
+            path: "~/.pi/agent/AGENTS.md",
+            is_custom: false,
+        },
+        RuleAgentChoice {
             name: "Custom path...",
             path: "",
             is_custom: true,

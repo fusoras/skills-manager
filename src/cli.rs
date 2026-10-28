@@ -351,6 +351,9 @@ pub enum RuleCommand {
         /// Target .cursor/AGENTS.md (or ~/.cursor/AGENTS.md with --global)
         #[arg(long)]
         cursor: bool,
+        /// Target .pi/AGENTS.md (or ~/.pi/agent/AGENTS.md with --global)
+        #[arg(long)]
+        pi: bool,
         /// Custom destination file path
         #[arg(long, value_name = "PATH")]
         file: Option<String>,
@@ -402,6 +405,9 @@ pub enum RuleCommand {
         /// Target .cursor/AGENTS.md (or ~/.cursor/AGENTS.md with --global)
         #[arg(long)]
         cursor: bool,
+        /// Target .pi/AGENTS.md (or ~/.pi/agent/AGENTS.md with --global)
+        #[arg(long)]
+        pi: bool,
         /// Custom destination file path
         #[arg(long, value_name = "PATH")]
         file: Option<String>,
@@ -857,15 +863,17 @@ mod tests {
                     name,
                     global,
                     antigravity,
+                    pi,
                     ..
                 }),
-        } = parse(&["rule", "apply", "default", "-g", "--agy"]).command
+        } = parse(&["rule", "apply", "default", "-g", "--agy", "--pi"]).command
         else {
             panic!("expected `rule apply`");
         };
         assert_eq!(name.as_deref(), Some("default"));
         assert!(global);
         assert!(antigravity);
+        assert!(pi);
 
         let Commands::Rule {
             action: Some(RuleCommand::Sync { global, dry_run }),

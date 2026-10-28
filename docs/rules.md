@@ -36,12 +36,13 @@ The instructions are placed between comment markers:
 
 ### 3. Apply to a Specific Agent Globally
 
-Configure your global agent instructions (e.g. Antigravity CLI / Gemini, Claude, Cursor):
+Configure your global agent instructions (e.g. Antigravity CLI / Gemini, Claude, Cursor, Pi):
 
 ```sh
 skm rule apply --global --agy       # Configures ~/.gemini/GEMINI.md
 skm rule apply --global --claude    # Configures ~/.claude/CLAUDE.md
 skm rule apply --global --cursor    # Configures ~/.cursor/AGENTS.md
+skm rule apply --global --pi        # Configures ~/.pi/agent/AGENTS.md
 ```
 
 ### 4. Check Status & Sync Updates
@@ -238,14 +239,14 @@ If no other content remains in the target file, `skm` removes the file entirely.
 In `--global` mode, **`skm` strictly refuses to default to `~/.agents/AGENTS.md`**. No standard AI coding assistant or agent reads instructions from that path.
 
 In `--global` mode, you must provide:
-1. An explicit agent flag (`--agy`, `--claude`, `--opencode`, `--cursor`), or
+1. An explicit agent flag (`--agy`, `--claude`, `--opencode`, `--cursor`, `--pi`), or
 2. An explicit file path (`--file <path>`), or
 3. Run in an interactive terminal, where an interactive multi-select menu (`inquire`) will prompt you to select targets or enter a custom path.
 
 Running `skm rule apply --global` without flags in non-interactive mode aborts immediately with an error:
 
 ```text
-error: --global requires specifying a target agent (--agy, --claude, --opencode, --cursor) or --file <path>
+error: --global requires specifying a target agent (--agy, --claude, --opencode, --cursor, --pi) or --file <path>
 ```
 
 ### Agent Path Matrix
@@ -256,6 +257,7 @@ error: --global requires specifying a target agent (--agy, --claude, --opencode,
 | **Claude Code**       | `--claude`            | `CLAUDE.md`                 | `~/.claude/CLAUDE.md`            |
 | **OpenCode**          | `--opencode`          | `AGENTS.md`                 | `~/.config/opencode/AGENTS.md`   |
 | **Cursor**            | `--cursor`            | `.cursor/AGENTS.md`         | `~/.cursor/AGENTS.md`            |
+| **Pi**                | `--pi`                | `.pi/AGENTS.md`             | `~/.pi/agent/AGENTS.md`          |
 | **Custom Path**       | `--file <path>`       | `<path>`                    | `<path>`                         |
 | **Default (no flag)** | *(none)*              | `AGENTS.md` (project root)  | *(Forbidden without flags/menu)* |
 

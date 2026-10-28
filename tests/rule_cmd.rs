@@ -278,7 +278,7 @@ fn rule_global_without_target_fails_in_non_interactive_mode() {
         .assert()
         .failure()
         .stderr(predicates::str::contains(
-            "--global requires specifying a target agent (--agy, --claude, --opencode, --cursor) or --file <path>",
+            "--global requires specifying a target agent (--agy, --claude, --opencode, --cursor, --pi) or --file <path>",
         ));
 
     // Ensure ~/.agents/AGENTS.md was NEVER created
@@ -301,4 +301,17 @@ fn rule_global_with_agent_flag_installs_to_expected_agent_path() {
     let content = fs::read_to_string(&target).expect("read GEMINI.md");
     assert!(content.contains("<!-- BEGIN SKM INSTRUCTIONS -->"));
     assert!(content.contains("# Root Agent Guidelines"));
+
+    // Global Pi target: ~/.pi/agent/AGENTS.md
+    sandbox
+        .skm()
+        .args(["rule", "apply", "--global", "--pi"])
+        .assert()
+        .success();
+
+    let pi_target = sandbox.home.join(".pi").join("agent").join("AGENTS.md");
+    assert!(pi_target.is_file());
+    let pi_content = fs::read_to_string(&pi_target).expect("read ~/.pi/agent/AGENTS.md");
+    assert!(pi_content.contains("<!-- BEGIN SKM INSTRUCTIONS -->"));
+    assert!(pi_content.contains("# Root Agent Guidelines"));
 }

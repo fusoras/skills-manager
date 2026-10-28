@@ -201,6 +201,16 @@ fn resolve_targets_global_never_defaults_to_agents_agents_md() {
     let targets = resolve_rule_targets(&config, None, agy_flags, None, false).unwrap();
     assert_eq!(targets.len(), 1);
     assert!(targets[0].ends_with(".gemini/GEMINI.md"));
+
+    // With --pi flag
+    let pi_flags = RuleTargetFlags {
+        global: true,
+        pi: true,
+        ..RuleTargetFlags::default()
+    };
+    let pi_targets = resolve_rule_targets(&config, None, pi_flags, None, false).unwrap();
+    assert_eq!(pi_targets.len(), 1);
+    assert!(pi_targets[0].ends_with(".pi/agent/AGENTS.md"));
 }
 
 #[test]
@@ -213,4 +223,12 @@ fn resolve_targets_local_defaults_to_agents_md() {
     let targets = resolve_rule_targets(&config, Some(root), flags, None, false).unwrap();
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0], root.join("AGENTS.md"));
+
+    let pi_local = RuleTargetFlags {
+        pi: true,
+        ..RuleTargetFlags::default()
+    };
+    let pi_targets = resolve_rule_targets(&config, Some(root), pi_local, None, false).unwrap();
+    assert_eq!(pi_targets.len(), 1);
+    assert_eq!(pi_targets[0], root.join(".pi").join("AGENTS.md"));
 }
