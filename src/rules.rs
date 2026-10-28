@@ -416,9 +416,7 @@ pub fn find_rule(store_root: &Path, name: &str) -> Result<Rule> {
         normalized = stripped;
     }
 
-    if normalized.is_empty()
-        || normalized == "default"
-        || normalized.eq_ignore_ascii_case("agents")
+    if normalized.is_empty() || normalized == "default" || normalized.eq_ignore_ascii_case("agents")
     {
         if let Some(def) = available.iter().find(|r| r.is_default) {
             return Ok(def.clone());

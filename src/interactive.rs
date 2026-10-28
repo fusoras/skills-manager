@@ -242,7 +242,7 @@ pub struct RuleAgentChoice {
 impl std::fmt::Display for RuleAgentChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.is_custom {
-            write!(f, "{:<24} (Ruta personalizada)", self.name)
+            write!(f, "{:<24} (Custom path)", self.name)
         } else {
             write!(f, "{:<24} ({})", self.name, self.path)
         }
@@ -390,6 +390,29 @@ mod tests {
         assert_eq!(
             format!("{choice}"),
             "[pack]  frontend         (alpha, beta)"
+        );
+    }
+
+    #[test]
+    fn rule_agent_choice_formats_cleanly() {
+        let agent_choice = RuleAgentChoice {
+            name: "claude",
+            path: "~/.claude/CLAUDE.md",
+            is_custom: false,
+        };
+        assert_eq!(
+            format!("{agent_choice}"),
+            "claude                   (~/.claude/CLAUDE.md)"
+        );
+
+        let custom_choice = RuleAgentChoice {
+            name: "Custom path...",
+            path: "",
+            is_custom: true,
+        };
+        assert_eq!(
+            format!("{custom_choice}"),
+            "Custom path...           (Custom path)"
         );
     }
 }
