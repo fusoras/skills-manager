@@ -132,6 +132,25 @@ Pack B: [beta, gamma]
 
 ---
 
+## Renaming a Pack (`skm pack edit --rename`)
+
+```sh
+skm pack edit old-name --rename new-name
+```
+
+- Renames `<store>/packs/old-name.toml` to `<store>/packs/new-name.toml` and
+  rewrites the `name` field inside the file.
+- **Migrates references**: every project (and the global record) that has the
+  pack installed is updated in `projects.toml`, so installed skills keep their
+  pack association without reinstalling anything.
+- Refuses the rename when the target name already exists or is invalid
+  (empty, or contains path separators).
+- Preview the change safely with `--dry-run`.
+- Cannot be combined with `--add` / `--remove`: rename the pack first, then edit
+  its skills.
+
+---
+
 ## Local Detach Safety
 
 If you edit a skill installed via a pack locally inside your project:
@@ -161,4 +180,5 @@ remove`, `skm list --packs` and `skm status --packs` equivalents.
 | `skm pack edit <name>` | Open pack in `$EDITOR` (or `$VISUAL`) |
 | `skm pack edit <name> --add <skills>...` | Add skills directly from CLI |
 | `skm pack edit <name> --remove <skills>...` | Remove skills directly from CLI |
+| `skm pack edit <name> --rename <new>` | Rename the pack and migrate references in managed projects |
 | `skm status --packs` | Show installed packs in the current project |

@@ -402,6 +402,51 @@ impl Registry {
         });
         found_key.and_then(|k| self.projects.remove(&k))
     }
+    /// Rename every reference to pack `old` into `new` across all records
+    /// (projects plus the global record). Returns the number of updated records.
+    pub fn rename_pack_references(&mut self, old: &str, new: &str) -> usize {
+        let mut updated = 0;
+        if self
+            .global
+            .as_mut()
+            .is_some_and(|record| rename_pack_in_record(record, old, new))
+        {
+            updated += 1;
+        }
+        for record in self.projects.values_mut() {
+            if rename_pack_in_record(record, old, new) {
+                updated += 1;
+            }
+        }
+        updated
+    }
+}
+
+/// Replace pack references `old` -> `new` inside one record and its skills.
+///
+/// Only touches the record when it referenced `old`; keeps the lists sorted
+/// and deduplicated.
+fn rename_pack_in_record(record: &mut ProjectRecord, old: &str, new: &str) -> bool {
+    let referenced = record.packs.iter().any(|p| p == old)
+        || record
+            .skills
+            .iter()
+            .any(|s| s.packs.iter().any(|p| p == old));
+    if !referenced {
+        return false;
+    }
+    for entry in &mut record.skills {
+        for pack in &mut entry.packs {
+            if pack == old {
+                *pack = new.to_owned();
+            }
+        }
+        entry.packs.sort();
+        entry.packs.dedup();
+    }
+    record.packs.retain(|p| p != old);
+    record.add_pack(new);
+    true
 }
 
 #[cfg(test)]
@@ -419,6 +464,36 @@ mod tests {
             installed_at: 1_760_536_800,
             ..SkillState::default()
         }
+    }
+
+    #[test]
+    fn rename_pack_references_updates_projects_and_skills() {
+        let mut registry = Registry::default();
+
+        let mut record = ProjectRecord::default();
+        record.add_pack("old");
+        record.add_pack("other");
+        let mut entry = sample_skill("alpha", ".agents/skills");
+        entry.packs = vec!["old".to_owned(), "other".to_owned()];
+        record.upsert(entry.clone());
+        registry.projects.insert("proj".to_owned(), record);
+
+        // An unrelated record must stay untouched.
+        let mut clean = ProjectRecord::default();
+        clean.add_pack("unrelated");
+        registry.projects.insert("clean".to_owned(), clean);
+
+        assert_eq!(registry.rename_pack_references("old", "new"), 1);
+
+        let proj = registry.projects.get("proj").unwrap();
+        assert_eq!(proj.packs, ["new", "other"]);
+        let entry = proj.get(&entry.name, &entry.target).unwrap();
+        assert_eq!(entry.packs, ["new", "other"]);
+
+        assert_eq!(registry.projects.get("clean").unwrap().packs, ["unrelated"]);
+
+        // Renaming again is a no-op.
+        assert_eq!(registry.rename_pack_references("old", "new"), 0);
     }
 
     #[test]

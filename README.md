@@ -56,7 +56,7 @@ For complete details on store normalization, default targets, agent overrides, a
 | `skm store scan`                                                          | (deprecated alias of `skm list --all`)                     |
 | `skm list [--packs] [--skills] [--desc] [--all]`                           | Skills or packs in store; `--all` prints the full store report |
 | `skm pack show <name>`                                                    | Details of a pack (skills, description)                       |
-| `skm pack edit <name> [--add <skill>...] [--remove <skill>...]`           | Open pack in $EDITOR or add/remove skills directly via CLI    |
+| `skm pack edit <name> [--add <skill>...] [--remove <skill>...] [--rename <new>]` | Open pack in $EDITOR, add/remove skills, or rename it (migrates installed references) |
 | `skm projects`                                                            | List all managed projects on this machine                  |
 | `skm add [<name>...] [-i] [--pack\|--skill] [agent flags] [--pin] [--force] [--dry-run]` | Install skills or packs (names auto-resolved; interactive picker if empty) |
 | `skm remove <name>... [--pack\|--skill] [agent flags] [--force] [--dry-run]` | Delete copies or unregister packs with reference counting (names auto-resolved) |

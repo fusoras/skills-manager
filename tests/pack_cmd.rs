@@ -556,6 +556,78 @@ skills = ["alpha"]
     assert!(project.join(".agents/skills/alpha/SKILL.md").exists());
 }
 
+/// `skm pack edit --rename` moves the `.toml`, rewrites its `name` field and
+/// migrates the references of every project in the central registry.
+#[test]
+fn pack_edit_rename_migrates_installed_references() {
+    let (sandbox, store, project) = ready();
+
+    stdout_of(sandbox.skm_in(&project).args(["add", "frontend"]));
+
+    // --dry-run: preview without touching anything
+    let dry = stdout_of(sandbox.skm_in(&project).args([
+        "pack",
+        "edit",
+        "frontend",
+        "--rename",
+        "web",
+        "--dry-run",
+    ]));
+    assert!(dry.contains("Would rename pack frontend -> web"), "{dry}");
+    assert!(dry.contains("1 project record(s)"), "{dry}");
+    assert!(dry.contains("Dry run: nothing was written."));
+    assert!(store.join("packs/frontend.toml").is_file());
+    assert!(!store.join("packs/web.toml").exists());
+
+    // Real rename
+    let out = stdout_of(
+        sandbox
+            .skm_in(&project)
+            .args(["pack", "edit", "frontend", "--rename", "web"]),
+    );
+    assert!(out.contains("Renamed pack frontend -> web"), "{out}");
+    assert!(out.contains("Updated 1 project record(s)"), "{out}");
+
+    // Store file moved and rewritten with the new name field
+    assert!(!store.join("packs/frontend.toml").is_file());
+    assert!(store.join("packs/web.toml").is_file());
+    let toml_text = fs::read_to_string(store.join("packs/web.toml")).unwrap();
+    assert!(toml_text.contains("name = \"web\""), "{toml_text}");
+
+    // Registry migrated: `status --packs` reports the pack under its new name
+    let status_out = stdout_of(sandbox.skm_in(&project).args(["status", "--packs"]));
+    assert!(status_out.contains("web"), "{status_out}");
+    assert!(status_out.contains("2 skills"), "{status_out}");
+    assert!(!status_out.contains("frontend"), "{status_out}");
+
+    // Collision with an existing pack is refused
+    let (stdout, stderr) =
+        failure_of(
+            sandbox
+                .skm_in(&project)
+                .args(["pack", "edit", "web", "--rename", "fullstack"]),
+        );
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("already exists"), "{stderr}");
+
+    // Combining with --add / --remove is refused
+    let (_, stderr_mix) = failure_of(
+        sandbox
+            .skm_in(&project)
+            .args(["pack", "edit", "web", "--rename", "x", "--add", "alpha"]),
+    );
+    assert!(
+        stderr_mix.contains("--rename cannot be combined"),
+        "{stderr_mix}"
+    );
+
+    // The renamed pack still works end to end (reference counting intact)
+    let rm = stdout_of(sandbox.skm_in(&project).args(["remove", "web"]));
+    assert!(rm.contains("Removed alpha"), "{rm}");
+    assert!(rm.contains("Removed beta"), "{rm}");
+    assert_clean_project(&project);
+}
+
 /// `skm remove` resolves each name: packs and individual skills can be mixed.
 #[test]
 fn remove_auto_resolves_mixed_pack_and_skill_names() {

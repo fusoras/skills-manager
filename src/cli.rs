@@ -209,6 +209,12 @@ pub enum PackCommand {
         /// Remove skill(s) from this pack
         #[arg(long, num_args = 1.., value_name = "SKILL")]
         remove: Vec<String>,
+        /// Rename the pack to this new name (migrates installed references too)
+        #[arg(long, value_name = "NAME")]
+        rename: Option<String>,
+        /// Show what would happen without writing anything
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Show status of packs installed in this project (deprecated alias of `skm status --packs`)
     #[command(hide = true)]
@@ -791,7 +797,9 @@ mod tests {
         assert!(agent);
 
         let Commands::Pack {
-            action: Some(PackCommand::Edit { name, add, remove }),
+            action: Some(PackCommand::Edit {
+                name, add, remove, ..
+            }),
         } = parse(&["pack", "edit", "frontend", "--add", "tailwind", "seo"]).command
         else {
             panic!("expected `pack edit`");
@@ -801,7 +809,9 @@ mod tests {
         assert!(remove.is_empty());
 
         let Commands::Pack {
-            action: Some(PackCommand::Edit { name, add, remove }),
+            action: Some(PackCommand::Edit {
+                name, add, remove, ..
+            }),
         } = parse(&["pack", "edit", "frontend", "--remove", "seo"]).command
         else {
             panic!("expected `pack edit`");
@@ -809,6 +819,22 @@ mod tests {
         assert_eq!(name, "frontend");
         assert!(add.is_empty());
         assert_eq!(remove, ["seo"]);
+
+        let Commands::Pack {
+            action: Some(PackCommand::Edit { name, rename, .. }),
+        } = parse(&["pack", "edit", "frontend", "--rename", "web"]).command
+        else {
+            panic!("expected `pack edit --rename`");
+        };
+        assert_eq!(name, "frontend");
+        assert_eq!(rename.as_deref(), Some("web"));
+
+        let Commands::Pack {
+            action: Some(PackCommand::Edit { rename: None, .. }),
+        } = parse(&["pack", "edit", "frontend"]).command
+        else {
+            panic!("expected `pack edit` without rename");
+        };
     }
 
     #[test]

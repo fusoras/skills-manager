@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-29
+
 ### Changed
 
 - Command surface unified:
@@ -18,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added `skm list --all`: full store report (path, state, layout, skills, packs and warnings), replacing `skm store scan` as the canonical full-scan command.
+
+- Added `skm pack edit <name> --rename <new>`: renames the pack `.toml`, rewrites its `name` field and migrates pack references in every managed project of the central registry. Supported with `--dry-run`; refuses collisions and cannot be combined with `--add` / `--remove`.
 
 - Added `skm rule` command suite for non-destructive management, injection, and synchronization of `AGENTS.md` and agent instructions (`GEMINI.md`, `CLAUDE.md`, etc.).
   - Default rule resolution: defaults to `<store>/AGENTS.md` when no rule name is passed to `skm rule apply`.
@@ -39,3 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed pack resolution and discovery (`skm pack list`, `skm pack show`, `skm pack edit`, `skm list --packs`, `skm add <pack>`) failing to locate packs in `<store>/packs/` when the registered store path begins with a tilde (`~` e.g. `~/skills-store`).
 - Introduced `Config::store_root()` to reliably resolve and expand store paths starting with `~` across pack commands, interactive selection, and rule commands.
 - Fixed tilde expansion in rule commands (`skm rule list`, `skm rule show`, `skm rule apply`, `skm rule sync`) when the store path is saved with a leading `~`.
+
+[Unreleased]: https://github.com/fusoras/skills-manager/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/fusoras/skills-manager/releases/tag/v0.1.0

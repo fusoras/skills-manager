@@ -249,7 +249,13 @@ fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
             list_packs(out)
         }
         Some(PackCommand::Show { name }) => pack_show(out, &name),
-        Some(PackCommand::Edit { name, add, remove }) => pack_edit(out, &name, &add, &remove),
+        Some(PackCommand::Edit {
+            name,
+            add,
+            remove,
+            rename,
+            dry_run,
+        }) => pack_edit(out, &name, &add, &remove, rename, dry_run),
         Some(PackCommand::Status { global }) => {
             warn_deprecated("`skm pack status` is deprecated; use `skm status --packs`");
             pack_status(out, global)
@@ -1066,7 +1072,24 @@ fn pack_status(out: &mut Printer, global: bool) -> Result<()> {
     Ok(())
 }
 
-fn pack_edit(out: &mut Printer, name: &str, add: &[String], remove: &[String]) -> Result<()> {
+fn pack_edit(
+    out: &mut Printer,
+    name: &str,
+    add: &[String],
+    remove: &[String],
+    rename: Option<String>,
+    dry_run: bool,
+) -> Result<()> {
+    if let Some(new_name) = rename {
+        if !add.is_empty() || !remove.is_empty() {
+            bail!("--rename cannot be combined with --add or --remove; rename the pack first");
+        }
+        return pack_rename(out, name, &new_name, dry_run);
+    }
+    if dry_run {
+        bail!("nothing to preview: pass --rename or use --dry-run only with --rename");
+    }
+
     let config = config::load()?;
     let store_root = config.store_root()?;
     let style = out.style();
@@ -1127,6 +1150,52 @@ fn pack_edit(out: &mut Printer, name: &str, add: &[String], remove: &[String]) -
         details.join("; ")
     ))?;
 
+    Ok(())
+}
+
+/// `skm pack edit <old> --rename <new>`: rename the pack file and migrate every
+/// installed reference in the central registry.
+fn pack_rename(out: &mut Printer, old: &str, new: &str, dry_run: bool) -> Result<()> {
+    let config = config::load()?;
+    let store_root = config.store_root()?;
+    let pack = pack::rename_pack(&store_root, old, new, dry_run)?;
+
+    let mut registry = crate::registry::Registry::load()?;
+    let updated = registry.rename_pack_references(old, pack.name.as_str());
+    if updated > 0 && !dry_run {
+        registry.save()?;
+    }
+
+    let style = out.style();
+    if dry_run {
+        out.line(&format!(
+            "Would rename pack {} -> {}",
+            style.warn(old),
+            style.ok(&pack.name)
+        ))?;
+        if updated == 0 {
+            out.line(&format!("No installed copies reference '{old}'."))?;
+        } else {
+            out.line(&format!(
+                "{updated} project record(s) reference '{old}' and would be updated"
+            ))?;
+        }
+        out.line(DRY_RUN_NOTE)?;
+        return Ok(());
+    }
+
+    out.line(&format!(
+        "Renamed pack {} -> {}",
+        style.warn(old),
+        style.ok(&pack.name)
+    ))?;
+    if updated == 0 {
+        out.line(&format!("No installed copies referenced '{old}'."))?;
+    } else {
+        out.line(&format!(
+            "Updated {updated} project record(s) in the central registry"
+        ))?;
+    }
     Ok(())
 }
 

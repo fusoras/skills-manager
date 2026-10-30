@@ -167,6 +167,63 @@ pub fn remove_skills_from_pack(
     Ok(pack)
 }
 
+/// Validate a pack rename: well-formed new name, source exists, target free.
+///
+/// Returns the pack as currently defined (before the rename).
+pub fn validate_rename(store_root: &Path, old: &str, new: &str) -> Result<Pack> {
+    let trimmed = new.trim();
+    if trimmed.is_empty() {
+        bail!("new pack name must not be empty");
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains("..") {
+        bail!("invalid pack name '{trimmed}': the name must not contain path separators");
+    }
+    if trimmed.eq_ignore_ascii_case(old) {
+        bail!("pack is already named '{trimmed}'");
+    }
+    if find_pack_file(store_root, old)?.is_none() {
+        bail!("pack '{old}' not found in the store packs/ directory");
+    }
+    if let Some(existing) = find_pack_file(store_root, trimmed)? {
+        bail!(
+            "pack '{trimmed}' already exists ({}); choose another name",
+            existing.display()
+        );
+    }
+    load(store_root, old)
+}
+
+/// Rename pack `<store_root>/packs/<old>.toml` to `<store_root>/packs/<new>.toml`.
+///
+/// The `name` field inside the file is updated to the new name; the file is
+/// rewritten pretty-printed. With `dry_run` only the validations run. Returns
+/// the pack with its new name already applied.
+pub fn rename_pack(store_root: &Path, old: &str, new: &str, dry_run: bool) -> Result<Pack> {
+    let trimmed = new.trim();
+    let mut pack = validate_rename(store_root, old, trimmed)?;
+    pack.name = trimmed.to_owned();
+
+    if dry_run {
+        return Ok(pack);
+    }
+
+    let target = pack_file(store_root, trimmed);
+    let toml_str = toml::to_string_pretty(&pack).context("serializing pack")?;
+    fs::create_dir_all(packs_dir(store_root))?;
+    fs::write(&target, toml_str)
+        .with_context(|| format!("writing pack file '{}'", target.display()))?;
+    if let Some(source) = find_pack_file(store_root, old)?
+        && source != target
+        && let Err(error) = fs::remove_file(&source)
+    {
+        bail!(
+            "renamed pack file exists, but removing the old one failed ({}): {error}",
+            source.display()
+        );
+    }
+    Ok(pack)
+}
+
 fn save_pack_file(file: &Path, pack: &Pack) -> Result<()> {
     if file.is_file()
         && let Ok(content) = fs::read_to_string(file)
@@ -228,6 +285,68 @@ pub fn list(store_root: &Path) -> Result<Vec<Pack>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_pack(root: &Path, name: &str, toml_text: &str) {
+        let dir = packs_dir(root);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{name}.toml")), toml_text).unwrap();
+    }
+
+    #[test]
+    fn rename_pack_rewrites_the_toml_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_pack(
+            root,
+            "old",
+            "name = \"old\"\ndescription = \"D\"\nskills = [\"a\", \"b\"]\n",
+        );
+
+        let pack = rename_pack(root, "old", "new", false).unwrap();
+        assert_eq!(pack.name, "new");
+        assert!(!packs_dir(root).join("old.toml").is_file());
+        assert!(packs_dir(root).join("new.toml").is_file());
+
+        let loaded = load(root, "new").unwrap();
+        assert_eq!(loaded.name, "new");
+        assert_eq!(loaded.skills, ["a", "b"]);
+        assert_eq!(loaded.description.as_deref(), Some("D"));
+    }
+
+    #[test]
+    fn rename_pack_dry_run_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_pack(root, "old", "skills = [\"a\"]\n");
+
+        let pack = rename_pack(root, "old", "new", true).unwrap();
+        assert_eq!(pack.name, "new");
+        assert!(packs_dir(root).join("old.toml").is_file());
+        assert!(!packs_dir(root).join("new.toml").exists());
+    }
+
+    #[test]
+    fn rename_pack_rejects_collisions_and_invalid_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_pack(root, "one", "skills = []\n");
+        write_pack(root, "two", "skills = []\n");
+
+        let err = rename_pack(root, "one", "two", true).unwrap_err();
+        assert!(format!("{err:#}").contains("already exists"), "{err}");
+
+        let err = rename_pack(root, "one", "sub/dir", true).unwrap_err();
+        assert!(format!("{err:#}").contains("path separators"), "{err}");
+
+        let err = rename_pack(root, "one", "one", true).unwrap_err();
+        assert!(format!("{err:#}").contains("already named"), "{err}");
+
+        let err = rename_pack(root, "one", "  ", true).unwrap_err();
+        assert!(format!("{err:#}").contains("empty"), "{err}");
+
+        let err = rename_pack(root, "ghost", "new", true).unwrap_err();
+        assert!(format!("{err:#}").contains("not found"), "{err}");
+    }
 
     #[test]
     fn parse_pack_with_all_fields() {
