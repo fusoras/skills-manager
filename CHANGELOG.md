@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `skm pack edit <name> --rename <new>`: renames the pack `.toml`, rewrites its `name` field and migrates pack references in every managed project of the central registry. Supported with `--dry-run`; refuses collisions and cannot be combined with `--add` / `--remove`.
+
 ## [0.1.0] - 2026-10-29
 
 ### Changed
@@ -20,8 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added `skm list --all`: full store report (path, state, layout, skills, packs and warnings), replacing `skm store scan` as the canonical full-scan command.
-
-- Added `skm pack edit <name> --rename <new>`: renames the pack `.toml`, rewrites its `name` field and migrates pack references in every managed project of the central registry. Supported with `--dry-run`; refuses collisions and cannot be combined with `--add` / `--remove`.
 
 - Added `skm rule` command suite for non-destructive management, injection, and synchronization of `AGENTS.md` and agent instructions (`GEMINI.md`, `CLAUDE.md`, etc.).
   - Default rule resolution: defaults to `<store>/AGENTS.md` when no rule name is passed to `skm rule apply`.
