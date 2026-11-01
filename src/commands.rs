@@ -870,11 +870,12 @@ fn list_cmd(
     render_total(out, packs.len(), "pack", "packs")
 }
 
-/// Footer of `skm list`: one table's total, in plain text after a blank line.
+/// Footer of `skm list`: one table's total, dimmed in gray after a blank line.
 fn render_total(out: &mut Printer, count: usize, singular: &str, plural: &str) -> Result<()> {
     out.line("")?;
+    let style = out.style();
     let noun = if count == 1 { singular } else { plural };
-    out.line(&format!("Total: {count} {noun}"))?;
+    out.line(&style.gray(&format!("Total: {count} {noun}")))?;
     Ok(())
 }
 
