@@ -243,10 +243,14 @@ fn warn_deprecated(note: &str) {
 
 fn pack_cmd(out: &mut Printer, action: Option<PackCommand>) -> Result<()> {
     match action {
-        None => list_packs(out),
+        None => {
+            list_packs(out)?;
+            Ok(())
+        }
         Some(PackCommand::List) => {
             warn_deprecated("`skm pack list` is deprecated; use `skm list --packs`");
-            list_packs(out)
+            list_packs(out)?;
+            Ok(())
         }
         Some(PackCommand::Show { name }) => pack_show(out, &name),
         Some(PackCommand::Edit {
@@ -844,23 +848,33 @@ fn list_cmd(
     if all {
         return list_all(out);
     }
-    if packs_only {
-        return list_packs(out);
-    }
-    if skills_only {
-        return list_skills(out, show_desc);
-    }
-
-    list_skills(out, show_desc)?;
 
     let config = config::load()?;
-    let store_root = config.store_root()?;
-    let packs = pack::list(&store_root).unwrap_or_default();
-    if !packs.is_empty() {
-        out.line("")?;
-        render_packs_table(out, &packs, show_desc)?;
+    if packs_only {
+        let packs = list_packs(out)?;
+        return render_total(out, packs, "pack", "packs");
     }
 
+    let skills = list_skills(out, show_desc)?;
+    render_total(out, skills, "skill", "skills")?;
+    if skills_only {
+        return Ok(());
+    }
+
+    let packs = pack::list(&config.store_root()?).unwrap_or_default();
+    if packs.is_empty() {
+        return Ok(());
+    }
+    out.line("")?;
+    render_packs_table(out, &packs, show_desc)?;
+    render_total(out, packs.len(), "pack", "packs")
+}
+
+/// Footer of `skm list`: one table's total, in plain text after a blank line.
+fn render_total(out: &mut Printer, count: usize, singular: &str, plural: &str) -> Result<()> {
+    out.line("")?;
+    let noun = if count == 1 { singular } else { plural };
+    out.line(&format!("Total: {count} {noun}"))?;
     Ok(())
 }
 
@@ -888,7 +902,7 @@ fn render_packs_table(out: &mut Printer, packs: &[pack::Pack], show_desc: bool) 
     Ok(())
 }
 
-fn list_skills(out: &mut Printer, show_desc: bool) -> Result<()> {
+fn list_skills(out: &mut Printer, show_desc: bool) -> Result<usize> {
     let config = config::load()?;
     let report = store::scan(config.store_path()?)?;
     if !report.ready {
@@ -896,10 +910,11 @@ fn list_skills(out: &mut Printer, show_desc: bool) -> Result<()> {
         bail!("{}", report.warnings.join("; "));
     }
 
+    let count = report.skills.len();
     let style = out.style();
     if report.skills.is_empty() {
         out.line("No skills found in the store.")?;
-        return Ok(());
+        return Ok(count);
     }
 
     if show_desc {
@@ -935,7 +950,7 @@ fn list_skills(out: &mut Printer, show_desc: bool) -> Result<()> {
             .collect();
         out.table(&["SKILL"], &rows)?;
     }
-    Ok(())
+    Ok(count)
 }
 
 /// `OK` / `MISSING` marker for a store or report.
@@ -993,15 +1008,16 @@ fn projects_cmd(out: &mut Printer) -> Result<()> {
     Ok(())
 }
 
-fn list_packs(out: &mut Printer) -> Result<()> {
+fn list_packs(out: &mut Printer) -> Result<usize> {
     let config = config::load()?;
     let store_root = config.store_root()?;
     let packs = pack::list(&store_root)?;
     if packs.is_empty() {
         out.line("No packs found in the store.")?;
-        return Ok(());
+        return Ok(0);
     }
 
+    let count = packs.len();
     let style = out.style();
     let rows: Vec<Vec<String>> = packs
         .iter()
@@ -1014,7 +1030,7 @@ fn list_packs(out: &mut Printer) -> Result<()> {
         })
         .collect();
     out.table(&["PACK", "SKILLS", "DESCRIPTION"], &rows)?;
-    Ok(())
+    Ok(count)
 }
 
 fn pack_show(out: &mut Printer, name: &str) -> Result<()> {

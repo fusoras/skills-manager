@@ -17,7 +17,13 @@ fn list_shows_the_skills_of_the_store() {
     let listed = stdout_of(sandbox.skm().args(["list"]));
     assert_eq!(
         table_cells(&listed),
-        rows(&[&["SKILL"], &["alpha-declared"], &["beta"],])
+        rows(&[
+            &["SKILL"],
+            &["alpha-declared"],
+            &["beta"],
+            &[],
+            &["Total: 2 skills"]
+        ])
     );
 }
 
@@ -30,7 +36,13 @@ fn list_follows_the_catalog_layout() {
     let listed = stdout_of(sandbox.skm().args(["list"]));
     assert_eq!(
         table_cells(&listed),
-        rows(&[&["SKILL"], &["delta"], &["gamma"],])
+        rows(&[
+            &["SKILL"],
+            &["delta"],
+            &["gamma"],
+            &[],
+            &["Total: 2 skills"]
+        ])
     );
 }
 
@@ -50,6 +62,8 @@ fn list_shows_descriptions_with_flag() {
                 &["SKILL", "DESCRIPTION"],
                 &["alpha-declared", "test skill"],
                 &["beta", "-"],
+                &[],
+                &["Total: 2 skills"],
             ])
         );
     }
@@ -65,11 +79,12 @@ fn list_truncates_long_description_with_ellipsis() {
 
     let listed = stdout_of(sandbox.skm().args(["list", "--desc"]));
     let cells = table_cells(&listed);
-    assert_eq!(cells.len(), 2);
+    assert_eq!(cells.len(), 4);
     assert_eq!(cells[0], vec!["SKILL", "DESCRIPTION"]);
     assert_eq!(cells[1][0], "long-skill");
     assert!(cells[1][1].ends_with("..."));
     assert!(cells[1][1].len() <= 60);
+    assert_eq!(cells[3], vec!["Total: 1 skill"]);
 }
 
 #[test]
@@ -122,7 +137,22 @@ fn list_reports_an_empty_store() {
         .args(["list"])
         .assert()
         .success()
-        .stdout("No skills found in the store.\n");
+        .stdout("No skills found in the store.\n\nTotal: 0 skills\n");
+}
+
+#[test]
+fn list_skills_flag_reports_an_empty_store() {
+    let sandbox = Sandbox::new();
+    let empty = sandbox.path("empty-store");
+    fs::create_dir_all(&empty).expect("create dir");
+    sandbox.register_store(&empty);
+
+    sandbox
+        .skm()
+        .args(["list", "--skills"])
+        .assert()
+        .success()
+        .stdout("No skills found in the store.\n\nTotal: 0 skills\n");
 }
 #[test]
 fn list_fails_without_a_registered_store() {
@@ -175,8 +205,12 @@ skills = ["alpha", "beta"]
             &["alpha"],
             &["beta"],
             &[],
+            &["Total: 2 skills"],
+            &[],
             &["PACK", "SKILLS"],
             &["bundle", "alpha, beta"],
+            &[],
+            &["Total: 1 pack"],
         ])
     );
 }
@@ -208,8 +242,12 @@ skills = ["alpha", "beta"]
             &["alpha", "First skill"],
             &["beta", "Second skill"],
             &[],
+            &["Total: 2 skills"],
+            &[],
             &["PACK", "SKILLS", "DESCRIPTION"],
             &["bundle", "alpha, beta", "A bundle of skills"],
+            &[],
+            &["Total: 1 pack"],
         ])
     );
 }
@@ -232,5 +270,156 @@ skills = ["alpha"]
     sandbox.register_store(&store);
 
     let listed = stdout_of(sandbox.skm().args(["list", "--skills"]));
-    assert_eq!(table_cells(&listed), rows(&[&["SKILL"], &["alpha"]]));
+    assert_eq!(
+        table_cells(&listed),
+        rows(&[&["SKILL"], &["alpha"], &[], &["Total: 1 skill"]])
+    );
+}
+
+#[test]
+fn list_packs_flag_shows_only_packs_and_the_pack_total() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.path("store");
+    sandbox.skill(&store, "alpha", Some("alpha"));
+    sandbox.skill(&store, "beta", Some("beta"));
+
+    let packs_dir = store.join("packs");
+    fs::create_dir_all(&packs_dir).expect("create packs dir");
+    write(
+        &packs_dir.join("bundle.toml"),
+        r#"
+name = "bundle"
+description = "A bundle of skills"
+skills = ["alpha"]
+"#,
+    );
+    sandbox.register_store(&store);
+
+    let listed = stdout_of(sandbox.skm().args(["list", "--packs"]));
+    assert_eq!(
+        table_cells(&listed),
+        rows(&[
+            &["PACK", "SKILLS", "DESCRIPTION"],
+            &["bundle", "alpha", "A bundle of skills"],
+            &[],
+            &["Total: 1 pack"],
+        ])
+    );
+}
+
+#[test]
+fn list_skills_flag_does_not_report_packs() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.path("store");
+    sandbox.skill(&store, "alpha", Some("alpha"));
+
+    let packs_dir = store.join("packs");
+    fs::create_dir_all(&packs_dir).expect("create packs dir");
+    write(
+        &packs_dir.join("bundle.toml"),
+        "name = \"bundle\"\nskills = [\"alpha\"]\n",
+    );
+    sandbox.register_store(&store);
+
+    let listed = stdout_of(sandbox.skm().args(["list", "--skills"]));
+    assert!(
+        !listed.contains("pack"),
+        "skills-only mode must not mention packs:\n{listed}"
+    );
+    assert!(
+        listed.ends_with("\n\nTotal: 1 skill\n"),
+        "unexpected output:\n{listed}"
+    );
+}
+
+#[test]
+fn list_packs_flag_does_not_report_skills() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.path("store");
+    sandbox.skill(&store, "alpha", Some("alpha"));
+
+    let packs_dir = store.join("packs");
+    fs::create_dir_all(&packs_dir).expect("create packs dir");
+    write(
+        &packs_dir.join("bundle.toml"),
+        "name = \"bundle\"\nskills = [\"alpha\"]\n",
+    );
+    sandbox.register_store(&store);
+
+    let listed = stdout_of(sandbox.skm().args(["list", "--packs"]));
+    assert!(
+        !listed.contains("skill"),
+        "packs-only mode must not mention skills:\n{listed}"
+    );
+    assert!(
+        listed.ends_with("\n\nTotal: 1 pack\n"),
+        "unexpected output:\n{listed}"
+    );
+}
+
+#[test]
+fn list_reports_zero_pack_total_in_packs_mode_for_an_empty_store() {
+    let sandbox = Sandbox::new();
+    let empty = sandbox.path("empty-store");
+    fs::create_dir_all(&empty).expect("create dir");
+    sandbox.register_store(&empty);
+
+    sandbox
+        .skm()
+        .args(["list", "--packs"])
+        .assert()
+        .success()
+        .stdout("No packs found in the store.\n\nTotal: 0 packs\n");
+}
+
+#[test]
+fn list_prints_each_total_right_below_its_own_table() {
+    let sandbox = Sandbox::new();
+    let store = sandbox.path("store");
+    sandbox.skill(&store, "alpha", Some("alpha"));
+
+    let packs_dir = store.join("packs");
+    fs::create_dir_all(&packs_dir).expect("create packs dir");
+    write(
+        &packs_dir.join("one.toml"),
+        "name = \"one\"\nskills = [\"alpha\"]\n",
+    );
+    write(
+        &packs_dir.join("two.toml"),
+        "name = \"two\"\nskills = [\"alpha\"]\n",
+    );
+    sandbox.register_store(&store);
+
+    // Default: the skills total sits between the two tables, the packs total closes the output.
+    for args in [vec!["list"], vec!["list", "--desc"]] {
+        let listed = stdout_of(sandbox.skm().args(&args));
+        assert!(
+            listed.contains("Total: 1 skill\n\nPACK"),
+            "skills total is not right below the skills table for {args:?}:\n{listed}"
+        );
+        assert!(
+            listed.ends_with("\n\nTotal: 2 packs\n"),
+            "packs total is not right below the packs table for {args:?}:\n{listed}"
+        );
+        assert_eq!(
+            listed.matches("Total:").count(),
+            2,
+            "expected one total per table for {args:?}:\n{listed}"
+        );
+    }
+
+    // Single-table modes: only the total of the printed table.
+    let skills_only = stdout_of(sandbox.skm().args(["list", "--skills"]));
+    assert!(
+        skills_only.ends_with("\n\nTotal: 1 skill\n"),
+        "unexpected skills-only footer:\n{skills_only}"
+    );
+    assert_eq!(skills_only.matches("Total:").count(), 1);
+
+    let packs_only = stdout_of(sandbox.skm().args(["list", "--packs"]));
+    assert!(
+        packs_only.ends_with("\n\nTotal: 2 packs\n"),
+        "unexpected packs-only footer:\n{packs_only}"
+    );
+    assert_eq!(packs_only.matches("Total:").count(), 1);
 }

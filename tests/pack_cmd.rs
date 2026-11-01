@@ -66,9 +66,12 @@ fn pack_list_and_show() {
         ])
     );
 
-    // `skm list --packs` produces the exact same output
+    // `skm list --packs` adds the packs total below the exact same table.
     let output_list = stdout_of(sandbox.skm_in(&project).args(["list", "--packs"]));
-    assert_eq!(output, output_list);
+    let table = output_list
+        .strip_suffix("\n\nTotal: 2 packs\n")
+        .unwrap_or_else(|| panic!("missing packs total in:\n{output_list}"));
+    assert_eq!(output, format!("{table}\n"));
 
     // `skm pack show frontend`
     let output_show = stdout_of(sandbox.skm_in(&project).args(["pack", "show", "frontend"]));

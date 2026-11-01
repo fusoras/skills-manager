@@ -69,7 +69,7 @@ For complete details on store normalization, default targets, agent overrides, a
 | `skm rule status [-p\|--project] [-g\|--global]`                          | State of applied rules (ok, modified, behind, missing)    |
 | `skm rule remove <name> [-g] [agent flags] [--file <path>] [--dry-run]`    | Non-destructively remove managed rule block from target     |
 
-`skm list` prints the skills available in the store. Passing `--desc` (or `-d` / `--description`) includes the skill description dimmed in gray, truncated dynamically with an ellipsis (`...`) to adapt to the terminal width without hiding the first word. `--all` prints the full store report (path, state, layout, every skill, the number of `*.toml` packs and any warnings); `--packs` lists only the packs.
+`skm list` prints the skills available in the store, followed by a plain-text total for that table (`Total: 3 skills`) after a blank line. When the store has packs, they are listed below in their own table with their own total (`Total: 2 packs`). Passing `--desc` (or `-d` / `--description`) includes the skill description dimmed in gray, truncated dynamically with an ellipsis (`...`) to adapt to the terminal width without hiding the first word. `--all` prints the full store report (path, state, layout, every skill, the number of `*.toml` packs and any warnings); `--packs` lists only the packs (with `Total: N packs`), and `--skills` lists only the skills (with `Total: N skills`).
 
 `skm store add <path>` registers one path: the same path (compared after `~`
 expansion, so two spellings of one directory are one store) is a no-op and
