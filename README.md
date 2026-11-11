@@ -25,14 +25,13 @@ cargo install --path .
 ## Quick start
 
 ```sh
-skm store add ~/skills-store   # register the folder that holds your skills
-skm store                      # where it is, whether it is readable, its layout
+skm store add ~/skills-store           # register the folder that holds your skills
 
-skm add git-commit             # copy a skill into this project (a pack name works too)
-skm add seo --pin              # --pin: sync will never update it
-skm status                     # ok | behind | modified | pinned | ...
-skm sync                       # reconcile the project with the store
-skm list --all                 # full store report: skills, packs, layout, warnings
+skm list                               # full store report: skills, packs, layout
+skm add git-commit                     # copy a skill into this project (a pack name works too)
+skm add git-commit --opencode -g       # install globally for OpenCode (~/.config/opencode/skills)
+skm status                             # ok | behind | modified | pinned | ...
+skm sync                               # reconcile the project with the store
 ```
 
 ## Configuration
@@ -68,6 +67,7 @@ For complete details on store normalization, default targets, agent overrides, a
 | `skm rule sync [-g\|--global] [--dry-run]`                                | Reconcile applied rules with the store                     |
 | `skm rule status [-p\|--project] [-g\|--global]`                          | State of applied rules (ok, modified, behind, missing)    |
 | `skm rule remove <name> [-g] [agent flags] [--file <path>] [--dry-run]`    | Non-destructively remove managed rule block from target     |
+| `skm update [[<tag>] [--check] [--force]`                                 | Update binary to latest GitHub release (alias: `self-update`, `upgrade`) |
 
 `skm list` prints the skills available in the store, followed by a plain-text total for that table (`Total: 3 skills`) after a blank line. When the store has packs, they are listed below in their own table with their own total (`Total: 2 packs`). Passing `--desc` (or `-d` / `--description`) includes the skill description dimmed in gray, truncated dynamically with an ellipsis (`...`) to adapt to the terminal width without hiding the first word. `--all` prints the full store report (path, state, layout, every skill, the number of `*.toml` packs and any warnings); `--packs` lists only the packs (with `Total: N packs`), and `--skills` lists only the skills (with `Total: N skills`).
 

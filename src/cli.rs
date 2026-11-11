@@ -181,6 +181,19 @@ pub enum Commands {
         #[command(subcommand)]
         action: Option<RuleCommand>,
     },
+    /// Update skm binary to the latest release from GitHub
+    #[command(alias = "self-update", alias = "upgrade")]
+    Update {
+        /// Specific version or release tag to install (defaults to latest)
+        #[arg(value_name = "TAG")]
+        tag: Option<String>,
+        /// Check for available updates without installing
+        #[arg(long)]
+        check: bool,
+        /// Force reinstallation even if already at the latest version
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Actions of `skm pack`.
@@ -964,5 +977,33 @@ mod tests {
         };
         assert_eq!(name, "default");
         assert!(global);
+    }
+
+    #[test]
+    fn update_command_parses_arguments_and_aliases() {
+        let Commands::Update { tag, check, force } = parse(&["update"]).command else {
+            panic!("expected `update`");
+        };
+        assert_eq!(tag, None);
+        assert!(!check);
+        assert!(!force);
+
+        let Commands::Update { tag, check, force } =
+            parse(&["update", "v0.2.0", "--force"]).command
+        else {
+            panic!("expected `update` with tag");
+        };
+        assert_eq!(tag.as_deref(), Some("v0.2.0"));
+        assert!(!check);
+        assert!(force);
+
+        let Commands::Update { check, .. } = parse(&["self-update", "--check"]).command else {
+            panic!("expected `self-update` alias");
+        };
+        assert!(check);
+
+        let Commands::Update { .. } = parse(&["upgrade"]).command else {
+            panic!("expected `upgrade` alias");
+        };
     }
 }

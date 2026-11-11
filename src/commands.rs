@@ -233,6 +233,7 @@ fn dispatch(out: &mut Printer, cli: Cli) -> Result<()> {
         } => sync_cmd(out, skills, to_store, force, dry_run, global),
         Commands::Projects => projects_cmd(out),
         Commands::Rule { action } => rule_cmd(out, action),
+        Commands::Update { tag, check, force } => update_cmd(out, tag.as_deref(), check, force),
     }
 }
 
@@ -1007,6 +1008,17 @@ fn projects_cmd(out: &mut Printer) -> Result<()> {
     }
     out.table(&["PROJECT", "INSTALLED", "STATUS"], &rows)?;
     Ok(())
+}
+
+fn update_cmd(out: &mut Printer, tag: Option<&str>, check: bool, force: bool) -> Result<()> {
+    crate::update::execute(
+        out,
+        &crate::update::UpdateOptions {
+            tag,
+            check,
+            force,
+        },
+    )
 }
 
 fn list_packs(out: &mut Printer) -> Result<usize> {

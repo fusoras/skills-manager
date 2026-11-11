@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- add `skm update` command to self-update binary from GitHub releases
+- add support for metadata.version in SKILL.md frontmatter
 - Added `skm pack edit <name> --rename <new>`: renames the pack `.toml`, rewrites its `name` field and migrates pack references in every managed project of the central registry. Supported with `--dry-run`; refuses collisions and cannot be combined with `--add` / `--remove`.
+- add skill and pack totals to `skm list`, printed right below each table in gray
 
 ## [0.1.0] - 2026-10-29
 

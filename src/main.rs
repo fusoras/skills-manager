@@ -22,6 +22,7 @@ mod status;
 mod store;
 mod sync;
 mod targets;
+mod update;
 
 use std::process::ExitCode;
 
