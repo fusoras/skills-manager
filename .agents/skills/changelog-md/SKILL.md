@@ -4,6 +4,8 @@ description: Maintain CHANGELOG.md following Keep a Changelog + SemVer. Use when
   "add changelog", "agregar CHANGELOG", "update the changelog", "release notes", "cut a release",
   or before tagging a release. Never writes entries without explicit approval; unaccepted
   candidates are parked in `.agents/PLAN.md` under `## Pending CHANGELOG`.
+metadata:
+  version: "1.0"
 ---
 
 # CHANGELOG.md
