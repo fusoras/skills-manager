@@ -5,7 +5,7 @@
 set -e
 
 # Default version tag (overridden if RELEASE_TAG environment variable is set)
-VERSION="${RELEASE_TAG:-v0.1.0}"
+VERSION="${RELEASE_TAG:-v0.2.0}"
 REPO="fusoras/skills-manager"
 
 # Colors for terminal output

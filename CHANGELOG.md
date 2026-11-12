@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-11
+
 ### Added
 
 - add `skm update` command to self-update binary from GitHub releases
@@ -49,5 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Introduced `Config::store_root()` to reliably resolve and expand store paths starting with `~` across pack commands, interactive selection, and rule commands.
 - Fixed tilde expansion in rule commands (`skm rule list`, `skm rule show`, `skm rule apply`, `skm rule sync`) when the store path is saved with a leading `~`.
 
-[Unreleased]: https://github.com/fusoras/skills-manager/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/fusoras/skills-manager/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/fusoras/skills-manager/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/fusoras/skills-manager/releases/tag/v0.1.0
